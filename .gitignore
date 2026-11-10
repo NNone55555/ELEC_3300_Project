@@ -22,3 +22,7 @@ mx.scratch
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Documents
+*.pdf
+*.md
