@@ -25,4 +25,4 @@ Thumbs.db
 
 # Documents
 *.pdf
-*.md
+log/*.md

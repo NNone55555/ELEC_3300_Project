@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lcd.h"
-#include "uart_test.h"
+#include "pmw3360_test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -127,7 +127,7 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   LCD_INIT();
-  LCD_DrawString(0, 0, "USART1 serial test");
+  LCD_DrawString(0, 0, "PMW3360 motion test");
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -673,11 +673,11 @@ static void MX_FSMC_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  UART_Test_Init(&huart1);
+  PMW3360_Test_Init(&hspi2, &huart1);
   /* Infinite loop */
   for(;;)
   {
-    UART_Test_Poll();
+    PMW3360_Test_Poll();
     osDelay(10);
   }
   /* USER CODE END 5 */
