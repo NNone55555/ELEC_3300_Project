@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/lcd.c
     Core/Src/eeprom_test.c
+    Core/Src/uart_test.c
 )
 
 # Add include paths

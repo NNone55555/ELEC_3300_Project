@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lcd.h"
-#include "eeprom_test.h"
+#include "uart_test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -127,7 +127,7 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   LCD_INIT();
-  LCD_DrawString(0, 0, "EEPROM persistence test");
+  LCD_DrawString(0, 0, "USART1 serial test");
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -673,11 +673,11 @@ static void MX_FSMC_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  EEPROM_Test_Init(&hi2c1);
+  UART_Test_Init(&huart1);
   /* Infinite loop */
   for(;;)
   {
-    EEPROM_Test_Poll();
+    UART_Test_Poll();
     osDelay(10);
   }
   /* USER CODE END 5 */
