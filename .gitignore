@@ -1,0 +1,24 @@
+# Generated build output
+/build/
+/Debug/
+/Release/
+/cmake-build-*/
+*.o
+*.obj
+*.elf
+*.hex
+*.bin
+*.map
+*.su
+*.d
+
+# Local CMake and editor state
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+mx.scratch
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
