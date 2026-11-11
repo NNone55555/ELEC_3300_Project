@@ -95,6 +95,10 @@ void Error_Handler(void);
 #define LCD_RST_GPIO_Port GPIOE
 
 /* USER CODE BEGIN Private defines */
+#define FP_TOUCH_Pin GPIO_PIN_6
+#define FP_TOUCH_GPIO_Port GPIOE
+#define USB_ENABLE_Pin GPIO_PIN_6
+#define USB_ENABLE_GPIO_Port GPIOD
 
 /* USER CODE END Private defines */
 

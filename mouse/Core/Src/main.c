@@ -25,6 +25,7 @@
 #include "lcd.h"
 #include "mouse_app.h"
 #include "zw3020.h"
+#include "usb_device.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -129,6 +130,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   LCD_INIT();
   LCD_DrawString(0, 0, "Starting mouse sensors...");
+  MX_USB_DEVICE_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -190,6 +192,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef usb_clock = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -216,6 +219,13 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* Keep CPU/peripheral clocks at 72 MHz; USB needs PLL / 1.5 = 48 MHz. */
+  usb_clock.PeriphClockSelection = RCC_PERIPHCLK_USB;
+  usb_clock.UsbClockSelection = RCC_USBCLKSOURCE_PLL_DIV1_5;
+  if (HAL_RCCEx_PeriphCLKConfig(&usb_clock) != HAL_OK)
   {
     Error_Handler();
   }
@@ -603,7 +613,20 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
-
+  /* MINI V3 PD6 drives the external USB D+ pull-up transistor, active low. */
+  HAL_GPIO_WritePin(USB_ENABLE_GPIO_Port, USB_ENABLE_Pin, GPIO_PIN_SET);
+  GPIO_InitStruct.Pin = USB_ENABLE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(USB_ENABLE_GPIO_Port, &GPIO_InitStruct);
+  /* PE6 is the unused DHT/DS18B20 data connector, with a board 3.3 V pull-up.
+   * Use only as a raw TOUCHOUT diagnostic; UART matching verifies identity.
+   */
+  GPIO_InitStruct.Pin = FP_TOUCH_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(FP_TOUCH_GPIO_Port, &GPIO_InitStruct);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 

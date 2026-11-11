@@ -1,4 +1,4 @@
 # Fingerprint-Based Personalized Wireless Mouse
 
-- [Mouse firmware and combined sensor test](mouse/README.md)
+- [Mouse firmware, wired USB and testing](mouse/README.md)
 - `receiver/`: receiver firmware, developed separately.

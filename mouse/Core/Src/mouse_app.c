@@ -2,6 +2,9 @@
 #include "encoder.h"
 #include "fingerprint.h"
 #include "pmw3360.h"
+#include "mouse_buttons.h"
+#include "usb_hid_controller.h"
+#include "login_typing.h"
 #include "lcd.h"
 #include "main.h"
 #include "cmsis_os2.h"
@@ -15,7 +18,7 @@
 #define MOTION_PERIOD_TICKS 5U
 #define OPTICAL_RETRY_MS 2000U
 #define FP_CONTROL_FLAG 1U
-#define DISPLAY_ROWS 15U
+#define DISPLAY_ROWS 19U
 #define DISPLAY_COLUMNS 30U
 
 typedef struct {
@@ -24,6 +27,7 @@ typedef struct {
   int32_t x_total;
   int32_t y_total;
   EncoderSnapshot encoder;
+  MouseButtonsSnapshot buttons;
   FingerprintController fingerprint;
 } MouseStatus;
 
@@ -31,6 +35,7 @@ static MouseStatus shared_status;
 static osMutexId_t status_mutex;
 static osThreadId_t fingerprint_thread;
 static osThreadId_t motion_thread;
+static osThreadId_t usb_thread;
 static SPI_HandleTypeDef *motion_spi;
 static UART_HandleTypeDef *console;
 static volatile bool inputs_enabled;
@@ -49,6 +54,11 @@ static const osThreadAttr_t fingerprint_attributes = {
   .name = "fingerprint",
   .stack_size = 3072,
   .priority = osPriorityNormal
+};
+static const osThreadAttr_t usb_attributes = {
+  .name = "wiredMouse",
+  .stack_size = 1536,
+  .priority = osPriorityHigh
 };
 
 static int32_t AddCounts(int32_t current, int16_t delta)
@@ -72,6 +82,7 @@ void MouseApp_SampleInputs1ms(void)
     return;
   }
   Encoder_Sample1ms();
+  MouseButtons_Sample1ms();
   uint8_t pressed = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET;
   if (pressed != button_candidate)
   {
@@ -97,17 +108,9 @@ static void MotionTask(void *argument)
   (void)argument;
   Pmw3360Status optical_status = PMW3360_STARTING;
   uint32_t last_attempt = HAL_GetTick() - OPTICAL_RETRY_MS;
-  uint32_t handled_presses = 0U;
   uint32_t next_wake = osKernelGetTickCount();
   for (;;)
   {
-    uint32_t presses = button_presses;
-    if (presses != handled_presses)
-    {
-      handled_presses = presses;
-      (void)osThreadFlagsSet(fingerprint_thread, FP_CONTROL_FLAG);
-    }
-
     Pmw3360Motion motion = {0};
     if (optical_status == PMW3360_OK)
     {
@@ -123,10 +126,9 @@ static void MotionTask(void *argument)
       optical_status = Pmw3360_Init(motion_spi, DEFAULT_CPI);
     }
 
-    EncoderSnapshot encoder = Encoder_GetSnapshot();
+    UsbHid_AddMotion(motion.dx, motion.dy, 0);
     osMutexAcquire(status_mutex, osWaitForever);
     shared_status.optical_status = optical_status;
-    shared_status.encoder = encoder;
     shared_status.motion = motion;
     if (optical_status == PMW3360_OK)
     {
@@ -145,6 +147,40 @@ static void MotionTask(void *argument)
   }
 }
 
+static void WiredMouseTask(void *argument)
+{
+  (void)argument;
+  uint32_t next_wake = osKernelGetTickCount();
+  uint32_t handled_presses = 0U;
+  int32_t previous_scroll = Encoder_GetSnapshot().steps;
+  for (;;)
+  {
+    uint32_t presses = button_presses;
+    if (presses != handled_presses)
+    {
+      handled_presses = presses;
+      (void)osThreadFlagsSet(fingerprint_thread, FP_CONTROL_FLAG);
+    }
+    MouseButtonsSnapshot buttons = MouseButtons_GetSnapshot();
+    EncoderSnapshot encoder = Encoder_GetSnapshot();
+    int64_t scroll_delta = (int64_t)encoder.steps - previous_scroll;
+    int32_t wheel = scroll_delta > INT32_MAX ? INT32_MAX
+                    : scroll_delta < INT32_MIN ? INT32_MIN : (int32_t)scroll_delta;
+    previous_scroll = encoder.steps;
+    UsbHid_AddMotion(0, 0, wheel);
+    UsbHid_ServiceMouse(buttons.pressed);
+    osMutexAcquire(status_mutex, osWaitForever);
+    shared_status.buttons = buttons;
+    shared_status.encoder = encoder;
+    osMutexRelease(status_mutex);
+    ++next_wake;
+    uint32_t now = osKernelGetTickCount();
+    if ((int32_t)(next_wake - now) <= 0)
+      next_wake = now + 1U;
+    osDelayUntil(next_wake);
+  }
+}
+
 static void FingerprintTask(void *argument)
 {
   (void)argument;
@@ -154,7 +190,14 @@ static void FingerprintTask(void *argument)
   {
     uint32_t flags = osThreadFlagsWait(FP_CONTROL_FLAG, osFlagsWaitAny, 100);
     bool pressed = (flags & osFlagsError) == 0U && (flags & FP_CONTROL_FLAG) != 0U;
+    FingerprintState previous_state = controller.state;
     Fingerprint_Step(&controller, pressed);
+    if (previous_state == FP_SEARCH_DATABASE && controller.result == FP_RESULT_MATCH
+        && controller.state == FP_WAIT_REMOVAL)
+    {
+      /* Only a new UART-verified match triggers login, not the latched user ID. */
+      (void)Login_OnFingerprintMatch(controller.user.id);
+    }
     osMutexAcquire(status_mutex, osWaitForever);
     shared_status.fingerprint = controller;
     osMutexRelease(status_mutex);
@@ -179,6 +222,7 @@ bool MouseApp_Init(SPI_HandleTypeDef *optical_spi, UART_HandleTypeDef *fingerpri
     return false;
   }
   Encoder_Init();
+  MouseButtons_Init();
   /* If held at startup, require release before the next PA0 action. */
   button_candidate = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET;
   button_stable = button_candidate;
@@ -188,7 +232,8 @@ bool MouseApp_Init(SPI_HandleTypeDef *optical_spi, UART_HandleTypeDef *fingerpri
 
   fingerprint_thread = osThreadNew(FingerprintTask, NULL, &fingerprint_attributes);
   motion_thread = osThreadNew(MotionTask, NULL, &motion_attributes);
-  return fingerprint_thread != NULL && motion_thread != NULL;
+  usb_thread = osThreadNew(WiredMouseTask, NULL, &usb_attributes);
+  return fingerprint_thread != NULL && motion_thread != NULL && usb_thread != NULL;
 }
 
 static const char *FingerprintStateText(FingerprintState state)
@@ -235,7 +280,7 @@ static void RenderLine(uint8_t row, const char *text)
   if (memcmp(displayed_lines[row], padded, sizeof(padded)) != 0)
   {
     /* LCD_DrawString paints the character background, including padding. */
-    LCD_DrawString(0, row * 20U, padded);
+    LCD_DrawString(0, row * 16U, padded);
     memcpy(displayed_lines[row], padded, sizeof(padded));
   }
 }
@@ -243,7 +288,7 @@ static void RenderLine(uint8_t row, const char *text)
 static void RenderStatus(const MouseStatus *status)
 {
   char text[80];
-  RenderLine(0, "ELEC3300 wireless mouse");
+  RenderLine(0, "ELEC3300 wired USB mouse");
   RenderLine(1, "PA0: enroll / cancel / retry");
   RenderLine(2, FingerprintStateText(status->fingerprint.state));
   const FingerprintController *fp = &status->fingerprint;
@@ -276,9 +321,26 @@ static void RenderStatus(const MouseStatus *status)
              (unsigned)status->motion.lifted, (unsigned)status->encoder.phase_a,
              (unsigned)status->encoder.phase_b);
   RenderLine(11, text);
-  snprintf(text, sizeof(text), "FP cmd=%02X code=%d", (unsigned)fp->error_command, fp->error);
+  snprintf(text, sizeof(text), "FP touch=%u cmd=%02X code=%d",
+             (unsigned)(HAL_GPIO_ReadPin(FP_TOUCH_GPIO_Port, FP_TOUCH_Pin) == GPIO_PIN_SET),
+             (unsigned)fp->error_command, fp->error);
   RenderLine(12, text);
-  RenderLine(13, "Serial: 115200 8N1");
+  uint8_t buttons = status->buttons.pressed;
+  snprintf(text, sizeof(text), "L=%u R=%u M=%u (1=pressed)",
+             (unsigned)((buttons & MOUSE_BUTTON_LEFT) != 0U),
+             (unsigned)((buttons & MOUSE_BUTTON_RIGHT) != 0U),
+             (unsigned)((buttons & MOUSE_BUTTON_MIDDLE) != 0U));
+  RenderLine(13, text);
+  snprintf(text, sizeof(text), "Side1/Win=%u Side2=%u",
+             (unsigned)((buttons & MOUSE_BUTTON_SIDE1) != 0U),
+             (unsigned)((buttons & MOUSE_BUTTON_SIDE2) != 0U));
+  RenderLine(14, text);
+  snprintf(text, sizeof(text), "Raw pins=%02X USB overflow=%lu",
+             (unsigned)status->buttons.pin_levels,
+             (unsigned long)UsbHid_GetButtonOverflows());
+  RenderLine(15, text);
+  RenderLine(16, UsbHid_IsConfigured() ? "USB: mouse + keyboard ready" : "USB: waiting / suspended");
+  RenderLine(17, Login_GetStatusText());
 }
 
 void MouseApp_RunDisplay(void)
@@ -312,17 +374,23 @@ void MouseApp_RunDisplay(void)
       {
         snprintf(message, sizeof(message), "Heap free: %lu bytes",
                    (unsigned long)xPortGetFreeHeapSize());
-        RenderLine(14, message);
-        snprintf(message, sizeof(message), "RTOS stack free UI=%lu FP=%lu motion=%lu bytes\r\n",
+        RenderLine(18, message);
+        snprintf(message, sizeof(message), "Buttons=%02X raw=%02X USB=%u login=%u overflow=%lu stack free UI=%lu FP=%lu motion=%lu USB=%lu bytes\r\n",
+                   (unsigned)snapshot.buttons.pressed,
+                   (unsigned)snapshot.buttons.pin_levels,
+                   (unsigned)UsbHid_IsConfigured(),
+                   (unsigned)Login_GetState(),
+                   (unsigned long)UsbHid_GetButtonOverflows(),
                    (unsigned long)osThreadGetStackSpace(osThreadGetId()),
                    (unsigned long)osThreadGetStackSpace(fingerprint_thread),
-                   (unsigned long)osThreadGetStackSpace(motion_thread));
+                   (unsigned long)osThreadGetStackSpace(motion_thread),
+                   (unsigned long)osThreadGetStackSpace(usb_thread));
         (void)HAL_UART_Transmit(console, (const uint8_t *)message,
                                  (uint16_t)strlen(message), 100);
       }
       else
       {
-        RenderLine(14, "Console transmit error");
+        RenderLine(18, "Console transmit error");
       }
     }
     osDelay(100);

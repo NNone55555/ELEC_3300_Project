@@ -23,6 +23,9 @@ compile_commands.json
 mx.scratch
 *.log
 
+# Local login credential; never commit the real password.
+/mouse/private/
+
 # Operating system files
 .DS_Store
 Thumbs.db

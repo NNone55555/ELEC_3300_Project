@@ -51,7 +51,19 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/zw3020.c
     Core/Src/fingerprint.c
     Core/Src/mouse_app.c
+    Core/Src/mouse_buttons.c
+    Core/Src/usb_hid_controller.c
+    Core/Src/login_typing.c
 )
+
+# Credentials stay local; a fresh clone builds with login disabled.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/private/login_credentials.h")
+    target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE private)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE MOUSE_HAS_LOGIN_CREDENTIALS=1)
+endif()
+
+# Native STM32F103 USB, kept separate from CubeMX's generated CMake list.
+include(cmake/usb_device.cmake)
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
