@@ -23,7 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lcd.h"
-#include "fingerprint_test.h"
+#include "mouse_app.h"
+#include "zw3020.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,8 +60,8 @@ SRAM_HandleTypeDef hsram1;
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* USER CODE BEGIN PV */
 
@@ -127,7 +128,7 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   LCD_INIT();
-  LCD_DrawString(0, 0, "ZW3020 fingerprint test");
+  LCD_DrawString(0, 0, "Starting mouse sensors...");
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -154,7 +155,11 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  if (defaultTaskHandle == NULL || !MouseApp_Init(&hspi2, &huart2, &huart1))
+  {
+    LCD_DrawString(0, 20, "RTOS/sensor startup failed");
+    Error_Handler();
+  }
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -660,7 +665,15 @@ static void MX_FSMC_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
+{
+  Zw3020_OnRxComplete(uart);
+}
 
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
+{
+  Zw3020_OnUartError(uart);
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -673,13 +686,8 @@ static void MX_FSMC_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  Fingerprint_Test_Init(&huart2, &huart1);
-  /* Infinite loop */
-  for(;;)
-  {
-    Fingerprint_Test_Poll();
-    osDelay(10);
-  }
+  (void)argument;
+  MouseApp_RunDisplay();
   /* USER CODE END 5 */
 }
 
@@ -701,6 +709,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
+  if (htim->Instance == TIM4)
+  {
+    MouseApp_SampleInputs1ms();
+  }
   /* USER CODE END Callback 1 */
 }
 

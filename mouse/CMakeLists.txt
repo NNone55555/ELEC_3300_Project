@@ -46,11 +46,11 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/lcd.c
-    Core/Src/eeprom_test.c
-    Core/Src/uart_test.c
-    Core/Src/pmw3360_test.c
-    Core/Src/encoder_test.c
-    Core/Src/fingerprint_test.c
+    Core/Src/encoder.c
+    Core/Src/pmw3360.c
+    Core/Src/zw3020.c
+    Core/Src/fingerprint.c
+    Core/Src/mouse_app.c
 )
 
 # Add include paths
