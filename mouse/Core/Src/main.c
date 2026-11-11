@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lcd.h"
-#include "pmw3360_test.h"
+#include "encoder_test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -127,7 +127,7 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   LCD_INIT();
-  LCD_DrawString(0, 0, "PMW3360 motion test");
+  LCD_DrawString(0, 0, "EC10E1220501 scroll test");
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -673,11 +673,11 @@ static void MX_FSMC_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  PMW3360_Test_Init(&hspi2, &huart1);
+  Encoder_Test_Init(&huart1);
   /* Infinite loop */
   for(;;)
   {
-    PMW3360_Test_Poll();
+    Encoder_Test_Poll();
     osDelay(10);
   }
   /* USER CODE END 5 */
@@ -701,7 +701,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-
+  if (htim->Instance == TIM4)
+  {
+    Encoder_Test_Sample();
+  }
   /* USER CODE END Callback 1 */
 }
 
