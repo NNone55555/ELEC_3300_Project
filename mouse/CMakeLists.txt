@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/uart_test.c
     Core/Src/pmw3360_test.c
     Core/Src/encoder_test.c
+    Core/Src/fingerprint_test.c
 )
 
 # Add include paths
