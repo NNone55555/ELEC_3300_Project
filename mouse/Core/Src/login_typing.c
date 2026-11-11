@@ -2,15 +2,9 @@
 #include "usb_hid_controller.h"
 #include "usbd_hid.h"
 #include "stm32f1xx_hal.h"
+#include "user_profile.h"
 #include <stddef.h>
 #include <string.h>
-
-#ifdef MOUSE_HAS_LOGIN_CREDENTIALS
-#include "login_credentials.h"
-#else
-#define LOGIN_FINGERPRINT_ID 0U
-#define LOGIN_PASSWORD ""
-#endif
 
 #define KEY_INTERVAL_MS 15U
 #define LOGIN_TIMEOUT_MS 10000U
@@ -18,13 +12,9 @@
 #define ENTER_USAGE 0x28U
 #define CAPS_LOCK_LED 0x02U
 
-/* This prototype must retain the text in MCU flash to emulate keyboard input.
- * Keep it out of tracked source, displays and serial output.
- */
-static const char password[] = LOGIN_PASSWORD;
-_Static_assert(sizeof(password) <= 129U, "Login password exceeds prototype limit");
-_Static_assert(LOGIN_FINGERPRINT_ID <= UINT16_MAX, "Invalid fingerprint ID");
-static volatile LoginState state = sizeof(password) > 1U ? LOGIN_ARMED : LOGIN_DISABLED;
+/* Private RAM copy, cleared on completion/abort; never log or display it. */
+static char password[PROFILE_PASSWORD_MAX + 1U];
+static volatile LoginState state = LOGIN_ARMED;
 static uint16_t character_index;
 static uint32_t session;
 static uint32_t started;
@@ -82,13 +72,16 @@ static bool IsTyping(LoginState current)
   return current == LOGIN_CLEAR_KEYS || current == LOGIN_PRESS_KEY || current == LOGIN_RELEASE_KEY;
 }
 
-bool Login_OnFingerprintMatch(uint16_t template_id)
+bool Login_RequestPassword(const char *text)
 {
   uint32_t interrupt_state = __get_PRIMASK();
   __disable_irq();
   bool accepted = false;
-  if (state == LOGIN_ARMED && template_id == LOGIN_FINGERPRINT_ID && UsbHid_IsConfigured())
+  if ((state == LOGIN_ARMED || state == LOGIN_SENT || state == LOGIN_ABORTED)
+      && UserProfile_ValidPassword(text) && UsbHid_IsConfigured())
   {
+    UserProfile_ClearSecret(password, sizeof(password));
+    memcpy(password, text, strlen(text));
     uint8_t usage, modifiers;
     bool valid = true;
     for (const char *character = password; *character != '\0'; ++character)
@@ -100,7 +93,7 @@ bool Login_OnFingerprintMatch(uint16_t template_id)
       session = USBD_HID_GetSession();
       started = HAL_GetTick();
       next_report = started;
-      state = LOGIN_CLEAR_KEYS; /* Consumes the only attempt, even if interrupted. */
+      state = LOGIN_CLEAR_KEYS; /* Profile manager gates one event per transition. */
       accepted = true;
     }
     else
@@ -115,9 +108,14 @@ void Login_OnUsbUnavailable(void)
   uint32_t interrupt_state = __get_PRIMASK();
   __disable_irq();
   if (IsTyping(state))
+  {
     state = LOGIN_ABORT_RELEASE;
+    UserProfile_ClearSecret(password, sizeof(password));
+  }
   __set_PRIMASK(interrupt_state);
 }
+
+void Login_Cancel(void) {Login_OnUsbUnavailable();}
 
 bool Login_Service(void)
 {
@@ -143,6 +141,7 @@ bool Login_Service(void)
   const uint8_t no_keys[6] = {0};
   if (state == LOGIN_ABORT_RELEASE)
   {
+    UserProfile_ClearSecret(password, sizeof(password));
     /* Release a possibly held key after USB recovers; never replay the text. */
     if (Send_Keyboard_Action(0U, no_keys))
       state = LOGIN_ABORTED;
@@ -174,7 +173,10 @@ bool Login_Service(void)
     else if (Send_Keyboard_Action(0U, no_keys))
     {
       if (password[character_index] == '\0')
+      {
         state = LOGIN_SENT;
+        UserProfile_ClearSecret(password, sizeof(password));
+      }
       else
       {
         ++character_index;
@@ -196,14 +198,14 @@ const char *Login_GetStatusText(void)
 {
   switch (state)
   {
-    case LOGIN_DISABLED: return "Login: no local credential";
-    case LOGIN_ARMED: return "Login: armed (one attempt)";
+    case LOGIN_DISABLED: return "Credential: disabled";
+    case LOGIN_ARMED: return "Credential: ready";
     case LOGIN_CLEAR_KEYS:
     case LOGIN_PRESS_KEY:
     case LOGIN_RELEASE_KEY: return "Login: typing once";
-    case LOGIN_SENT: return "Login: sent; reset to rearm";
+    case LOGIN_SENT: return "Credential: sent";
     case LOGIN_ABORT_RELEASE:
-    case LOGIN_ABORTED: return "Login: aborted; reset to retry";
+    case LOGIN_ABORTED: return "Credential: interrupted";
     case LOGIN_INVALID_CONFIG: return "Login: invalid local config";
   }
   return "Login: error";

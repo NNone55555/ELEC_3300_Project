@@ -3,7 +3,7 @@
 #include "cmsis_os2.h"
 
 #ifndef MOUSE_WS2812B_DEMO
-#define MOUSE_WS2812B_DEMO 1
+#define MOUSE_WS2812B_DEMO 0
 #endif
 
 #if MOUSE_WS2812B_DEMO

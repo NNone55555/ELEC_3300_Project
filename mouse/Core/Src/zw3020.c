@@ -309,3 +309,17 @@ uint8_t Zw3020_LastCommand(void)
 {
   return last_command;
 }
+
+int16_t Zw3020_Delete(uint16_t id)
+{
+  const uint8_t parameters[4] = {(uint8_t)(id >> 8), (uint8_t)id, 0, 1};
+  return Command(0x0C, parameters, sizeof(parameters), 0);
+}
+
+int16_t Zw3020_IsOccupied(uint16_t id, bool *occupied)
+{
+  uint8_t page = id / 256U;
+  int16_t result = Command(0x1F, &page, 1, 32);
+  if (result == ZW3020_OK) *occupied = (response[10U + (id % 256U) / 8U] & (1U << (id % 8U))) != 0U;
+  return result;
+}

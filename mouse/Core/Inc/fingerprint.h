@@ -17,7 +17,9 @@ typedef enum {
   FP_EXTRACT_MATCH,
   FP_SEARCH_DATABASE,
   FP_WAIT_REMOVAL,
-  FP_ERROR
+  FP_ERROR,
+  FP_CHECK_DUPLICATE,
+  FP_HOLD_TEMPLATE
 } FingerprintState;
 
 typedef enum {
@@ -28,7 +30,9 @@ typedef enum {
   FP_RESULT_CANCELLED,
   FP_RESULT_TIMEOUT,
   FP_RESULT_FULL,
-  FP_RESULT_ERROR
+  FP_RESULT_ERROR,
+  FP_RESULT_DUPLICATE,
+  FP_RESULT_PREPARED
 } FingerprintResult;
 
 typedef struct {
@@ -41,6 +45,8 @@ typedef struct {
   int16_t error;
   uint8_t error_command;
   uint32_t state_started;
+  bool reject_duplicates;
+  bool defer_store;
 } FingerprintController;
 
 void Fingerprint_Init(FingerprintController *controller);

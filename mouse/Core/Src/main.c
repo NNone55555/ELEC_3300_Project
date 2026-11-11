@@ -28,6 +28,7 @@
 #include "usb_device.h"
 #include "ws2812b.h"
 #include "ws2812b_task.h"
+#include "console_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -159,7 +160,7 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  if (defaultTaskHandle == NULL || !MouseApp_Init(&hspi2, &huart2, &huart1))
+  if (defaultTaskHandle == NULL || !MouseApp_Init(&hspi2, &huart2, &huart1, &hi2c1))
   {
     LCD_DrawString(0, 20, "RTOS/sensor startup failed");
     Error_Handler();
@@ -698,11 +699,18 @@ static void MX_FSMC_Init(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
 {
   Zw3020_OnRxComplete(uart);
+  Console_OnRxComplete(uart);
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
 {
   Zw3020_OnUartError(uart);
+  Console_OnError(uart);
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *uart)
+{
+  Console_OnTxComplete(uart);
 }
 
 void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *timer)

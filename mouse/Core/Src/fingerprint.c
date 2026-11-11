@@ -11,7 +11,8 @@ static void EnterState(FingerprintController *controller, FingerprintState state
 
 static bool EnrollmentInProgress(FingerprintState state)
 {
-  return state >= FP_FIND_FREE_SLOT && state <= FP_SAVE_TEMPLATE;
+  return (state >= FP_FIND_FREE_SLOT && state <= FP_SAVE_TEMPLATE)
+         || state == FP_CHECK_DUPLICATE || state == FP_HOLD_TEMPLATE;
 }
 
 static void CommandFailed(FingerprintController *controller, int16_t error)
@@ -141,7 +142,7 @@ void Fingerprint_Step(FingerprintController *controller, bool control_pressed)
       result = Zw3020_Extract(1);
       if (result == ZW3020_OK)
       {
-        EnterState(controller, FP_WAIT_FIRST_REMOVAL);
+        EnterState(controller, controller->reject_duplicates ? FP_CHECK_DUPLICATE : FP_WAIT_FIRST_REMOVAL);
       }
       else
       {
@@ -185,7 +186,12 @@ void Fingerprint_Step(FingerprintController *controller, bool control_pressed)
       result = Zw3020_Combine();
       if (result == ZW3020_OK)
       {
-        EnterState(controller, FP_SAVE_TEMPLATE);
+        if (controller->defer_store)
+        {
+          controller->result = FP_RESULT_PREPARED;
+          EnterState(controller, FP_HOLD_TEMPLATE);
+        }
+        else EnterState(controller, FP_SAVE_TEMPLATE);
       }
       else
       {
@@ -244,6 +250,25 @@ void Fingerprint_Step(FingerprintController *controller, bool control_pressed)
 
     case FP_ERROR:
       /* PA0 retries the connection. Other tasks keep collecting input. */
+      break;
+
+    case FP_CHECK_DUPLICATE:
+    {
+      Zw3020Match match;
+      result = Zw3020_Search(controller->storage.capacity, &match);
+      if (result == ZW3020_OK)
+      {
+        controller->user = match;
+        controller->result = FP_RESULT_DUPLICATE;
+        EnterState(controller, FP_WAIT_REMOVAL);
+      }
+      else if (result == ZW3020_NO_MATCH || result == ZW3020_EMPTY)
+        EnterState(controller, FP_WAIT_FIRST_REMOVAL);
+      else CommandFailed(controller, result);
+      break;
+    }
+    case FP_HOLD_TEMPLATE:
+      /* Combined template stays in module RAM until explicit Save or Cancel. */
       break;
   }
 }

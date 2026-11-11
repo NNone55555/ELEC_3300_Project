@@ -16,13 +16,16 @@ typedef enum {
   LOGIN_INVALID_CONFIG
 } LoginState;
 
-/* Only call for a fresh successful UART fingerprint match, never a touch edge.
- * Accepted once per MCU boot, only for the configured template and ready USB.
+/* Copies a validated 1..19-character alphanumeric password; ready USB required.
+ * No caller buffer is retained. The profile
+ * manager gates one request per user transition. Touch never authenticates.
  */
-bool Login_OnFingerprintMatch(uint16_t template_id);
+bool Login_RequestPassword(const char *text);
+void Login_Cancel(void);
 
 /* USB task owns the keyboard while this returns true. Sends at most one report
- * per call, yields between press/release reports, and never repeats a password.
+ * per call and yields between press/release reports. An interrupted request
+ * releases keys without replaying its text.
  */
 bool Login_Service(void);
 void Login_OnUsbUnavailable(void);

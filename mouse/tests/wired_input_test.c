@@ -10,6 +10,7 @@
 #include "mouse_buttons.h"
 #include "login_typing.h"
 #include "main.h"
+#include "user_profile.h"
 
 GPIO_TypeDef test_gpio[5];
 uint32_t test_primask;
@@ -305,52 +306,46 @@ static void TestKeyboardAndControl(void)
   puts("PASS: keyboard modifiers/keys/release, busy detection, LED control, GET_REPORT/IDLE, zero-motion idle reports, invalid requests.");
 }
 
-static void AssertWindowsReport(bool pressed)
+static void Pump(uint8_t buttons, unsigned count)
 {
-  assert(captured_size == sizeof(KeyboardReport) && captured_report[0] == 2);
-  assert(captured_report[1] == (pressed ? 0x08 : 0x00));
-  for (unsigned i = 2; i < sizeof(KeyboardReport); ++i)
-    assert(captured_report[i] == 0);
+  for (unsigned i=0; i<count; ++i) {
+    unsigned before=interrupt_transfers;
+    UsbHid_ServiceMouse(buttons);
+    if (before != interrupt_transfers) CompleteInterrupt();
+  }
 }
 
-static void TestSide1WindowsKey(void)
+static void TestSideMacros(void)
 {
-  /* Press/release both happen while the previous mouse report is still busy. */
-  assert(Send_Mouse_Action(0, 0, 0, 0));
-  unsigned before = interrupt_transfers;
-  UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1);
-  UsbHid_ServiceMouse(0);
-  assert(interrupt_transfers == before);
-  CompleteInterrupt();
-  UsbHid_ServiceMouse(0); AssertWindowsReport(true); CompleteInterrupt();
-  UsbHid_ServiceMouse(0);
-  assert(captured_report[0] == 1 && captured_report[1] == 0); /* No Back click. */
-  CompleteInterrupt();
-  UsbHid_ServiceMouse(0); AssertWindowsReport(false); CompleteInterrupt();
-  UsbHid_ServiceMouse(0);
-  assert(captured_report[0] == 1 && captured_report[1] == 0);
-  CompleteInterrupt();
-
-  /* Holding the switch does not repeatedly press the key. Other buttons work. */
-  UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1); AssertWindowsReport(true); CompleteInterrupt();
-  UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1); CompleteInterrupt();
-  before = interrupt_transfers;
-  for (unsigned i = 0; i < 5; ++i) UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1);
-  assert(interrupt_transfers == before);
-  UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1 | MOUSE_BUTTON_SIDE2);
-  assert(captured_report[0] == 1 && captured_report[1] == MOUSE_BUTTON_SIDE2);
-  CompleteInterrupt();
-  UsbHid_ServiceMouse(0); AssertWindowsReport(false); CompleteInterrupt();
-  UsbHid_ServiceMouse(0); CompleteInterrupt();
-
-  /* Releasing while suspended must not leave Windows held after resume. */
-  UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1); AssertWindowsReport(true); CompleteInterrupt();
-  UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1); CompleteInterrupt();
-  USBD_LL_Suspend(&hUsbDeviceFS); UsbHid_ServiceMouse(0);
-  USBD_LL_Resume(&hUsbDeviceFS);
-  UsbHid_ServiceMouse(0); AssertWindowsReport(false); CompleteInterrupt();
-  UsbHid_ServiceMouse(0); CompleteInterrupt();
-  puts("PASS: Side 1 Windows press/hold/release, busy quick taps, Back suppression, Side 2 and suspend release recovery.");
+  for (unsigned macro=0; macro<MACRO_COUNT; ++macro) {
+    UsbHid_SetSideMacros(macro,MACRO_FORWARD); Pump(0,6);
+    keyboard_count=0;
+    Pump(MOUSE_BUTTON_SIDE1,10);
+    if (macro>=MACRO_COPY && macro<=MACRO_SELECT_ALL) {
+      static const uint8_t usages[]={6,0x19,0x1D,4};
+      assert(keyboard_count==2 && keyboard_history[0][1]==1);
+      assert(keyboard_history[0][3]==usages[macro-MACRO_COPY]);
+      for(unsigned k=1;k<9;++k)assert(keyboard_history[1][k]==0);
+    } else {
+      assert(keyboard_count==0 && captured_report[0]==1);
+      assert(captured_report[1]==(macro==MACRO_BACK?8:macro==MACRO_FORWARD?16:0));
+    }
+    unsigned before=keyboard_count; Pump(MOUSE_BUTTON_SIDE1,10);assert(keyboard_count==before);
+    Pump(0,5);assert(captured_report[0]==1 && captured_report[1]==0);
+  }
+  UsbHid_SetSideMacros(MACRO_COPY,MACRO_PASTE);Pump(0,6);keyboard_count=0;
+  assert(Send_Mouse_Action(0,0,0,0));
+  UsbHid_ServiceMouse(MOUSE_BUTTON_SIDE1|MOUSE_BUTTON_SIDE2);UsbHid_ServiceMouse(0);
+  assert(keyboard_count==0);CompleteInterrupt();Pump(0,12);
+  assert(keyboard_count==4 && keyboard_history[0][3]==6 && keyboard_history[2][3]==0x19);
+  for(unsigned k=1;k<9;++k)assert(keyboard_history[1][k]==0 && keyboard_history[3][k]==0);
+  Pump(MOUSE_BUTTON_SIDE1,6);unsigned before=keyboard_count;
+  UsbHid_SetSideMacros(MACRO_UNDO,MACRO_DISABLED);Pump(MOUSE_BUTTON_SIDE1,10);
+  assert(keyboard_count==before+1); /* neutral sync only; no held-button macro */
+  Pump(0,5);Pump(MOUSE_BUTTON_SIDE1,6);assert(keyboard_history[keyboard_count-2][3]==0x1D);
+  USBD_LL_Suspend(&hUsbDeviceFS);UsbHid_ServiceMouse(0);USBD_LL_Resume(&hUsbDeviceFS);Pump(0,6);
+  for(unsigned k=1;k<9;++k)assert(keyboard_history[keyboard_count-1][k]==0);
+  puts("PASS: all seven side mappings, both simultaneous shortcuts, busy quick taps, press/release, hold suppression, remap and suspend release.");
 }
 
 static void TestReconnect(void)
@@ -385,65 +380,50 @@ static void PollLogin(uint8_t buttons, unsigned milliseconds)
 
 static void TestLoginSequence(bool caps_lock)
 {
-  assert(!Login_OnFingerprintMatch(0)); /* USB not ready: require a fresh scan. */
+  assert(!Login_RequestPassword("Alpha123")); /* USB not ready. */
   Enumerate(); SynchronizeMouse(0);
-  if (caps_lock)
-  {
-    Request(0x21, 0x09, 0x0202, 0, 2);
-    control_rx[0] = 2; control_rx[1] = 2;
-    USBD_LL_DataOutStage(&hUsbDeviceFS, 0, control_rx);
+  if (caps_lock) {
+    Request(0x21,0x09,0x0202,0,2);control_rx[0]=2;control_rx[1]=2;
+    USBD_LL_DataOutStage(&hUsbDeviceFS,0,control_rx);
   }
-  assert(Login_GetState() == LOGIN_ARMED && !Login_OnFingerprintMatch(1));
-  /* Windows is held before matching: login must release it and inhibit it. */
-  SynchronizeMouse(MOUSE_BUTTON_SIDE1);
-  keyboard_count = 0U;
-  assert(Login_OnFingerprintMatch(0));
-  assert(!Login_OnFingerprintMatch(0));
-  UsbHid_AddMotion(20, -30, 2);
-  PollLogin(MOUSE_BUTTON_SIDE1, 600);
-  assert(Login_GetState() == LOGIN_SENT && !Login_OnFingerprintMatch(0)
-         && !Login_OnFingerprintMatch(1));
-  const uint8_t expected_keys[] = {0x1E, 0x1E, 0x16, 0x16, 0x1F, 0x28};
-  unsigned characters = 0;
-  bool released = true;
-  for (unsigned i = 0; i < keyboard_count; ++i)
-  {
-    assert((keyboard_history[i][1] & 0x08U) == 0U);
-    uint8_t key = keyboard_history[i][3];
-    if (key != 0U)
-    {
-      assert(released && characters < sizeof(expected_keys));
-      assert(key == expected_keys[characters]);
-      uint8_t shift = characters == 2U ? 2U : 0U;
-      if (caps_lock && (characters == 2U || characters == 3U)) shift ^= 2U;
-      assert(keyboard_history[i][1] == shift);
-      ++characters;
-      released = false;
-    }
-    else
-    {
-      assert(keyboard_history[i][1] == 0U);
-      released = true;
+  assert(Login_GetState()==LOGIN_ARMED && !Login_RequestPassword("") && !Login_RequestPassword("invalid!"));
+  UsbHid_SetSideMacros(MACRO_COPY,MACRO_PASTE);SynchronizeMouse(0);
+  Pump(MOUSE_BUTTON_SIDE1,6);keyboard_count=0;
+  char caller_password[] = "Alpha123";
+  assert(Login_RequestPassword(caller_password));assert(!Login_RequestPassword("Alpha123"));
+  memset(caller_password, 'X', sizeof(caller_password) - 1U); /* Private TX copy must survive. */
+  UsbHid_AddMotion(20,-30,2);PollLogin(MOUSE_BUTTON_SIDE1,600);
+  assert(Login_GetState()==LOGIN_SENT);
+  const uint8_t expected[]={4,0x0F,0x13,0x0B,4,0x1E,0x1F,0x20,0x28};
+  unsigned characters=0;bool released=true;
+  for(unsigned i=0;i<keyboard_count;++i) {
+    uint8_t key=keyboard_history[i][3];
+    if(key) {
+      assert(released && characters<sizeof(expected) && key==expected[characters]);
+      bool alpha=characters<5;
+      bool shifted=alpha && ((characters==0) != caps_lock);
+      assert(keyboard_history[i][1]==(shifted?2:0));
+      ++characters;released=false;
+    } else {
+      for(unsigned k=1;k<9;++k)assert(keyboard_history[i][k]==0);
+      released=true;
     }
   }
-  assert(characters == sizeof(expected_keys) && released);
-  unsigned before = keyboard_count;
-  PollLogin(MOUSE_BUTTON_SIDE1, 100);
-  assert(keyboard_count == before); /* A held side button cannot reopen Start. */
-  PollLogin(0, 10); PollLogin(MOUSE_BUTTON_SIDE1, 10);
-  assert(keyboard_history[keyboard_count - 1U][1] == 8U);
-  PollLogin(0, 10);
-  USBD_LL_DevDisconnected(&hUsbDeviceFS); UsbHid_ServiceMouse(0);
-  Enumerate(); SynchronizeMouse(0);
-  assert(Login_GetState() == LOGIN_SENT && !Login_OnFingerprintMatch(0));
-  puts(caps_lock ? "PASS: login letter case honors host Caps Lock LEDs."
-                 : "PASS: ID-bound one-shot login, repeated digits, mixed case, Enter/release, Windows-key arbitration and reconnect stays spent.");
+  assert(characters==sizeof(expected) && released);
+  unsigned before=keyboard_count;PollLogin(MOUSE_BUTTON_SIDE1,100);assert(keyboard_count==before);
+  PollLogin(0,10);PollLogin(MOUSE_BUTTON_SIDE1,10);
+  assert(keyboard_count==before+2 && keyboard_history[before][1]==1 && keyboard_history[before][3]==6);
+  PollLogin(0,10);
+  USBD_LL_DevDisconnected(&hUsbDeviceFS);UsbHid_ServiceMouse(0);Enumerate();SynchronizeMouse(0);
+  assert(Login_GetState()==LOGIN_SENT);
+  puts(caps_lock?"PASS: password typing honors host Caps Lock LEDs.":
+    "PASS: password + Enter/release, busy exclusion, keyboard macro arbitration, held-side suppression and no reconnect replay.");
 }
 
 static void TestLoginAbort(const char *scenario)
 {
   Enumerate(); SynchronizeMouse(0);
-  assert(Login_OnFingerprintMatch(0));
+  assert(Login_RequestPassword("Alpha123"));
   PollLogin(0, 17); /* Prefix release and first character down. */
   assert(Login_GetState() == LOGIN_RELEASE_KEY);
   keyboard_count = 0U;
@@ -463,11 +443,43 @@ static void TestLoginAbort(const char *scenario)
     transmit_result = USBD_OK;
   }
   PollLogin(0, 100);
-  assert(Login_GetState() == LOGIN_ABORTED && !Login_OnFingerprintMatch(0));
+  assert(Login_GetState() == LOGIN_ABORTED);
   for (unsigned i = 0; i < keyboard_count; ++i)
     for (unsigned byte = 1; byte < 9; ++byte)
       assert(keyboard_history[i][byte] == 0U);
-  printf("PASS: interrupted login (%s) releases keys, never replays text and requires MCU reset.\n", scenario);
+  printf("PASS: interrupted login (%s) releases keys, never replays text and waits for a new profile transition.\n", scenario);
+}
+static void TestPasswordBoundaries(void)
+{
+  Enumerate(); SynchronizeMouse(0);
+  assert(!Login_RequestPassword(NULL) && !Login_RequestPassword(""));
+  assert(!Login_RequestPassword("Symbols!") && !Login_RequestPassword("Space Here"));
+  assert(!Login_RequestPassword("Abcdefgh012345678XYZ")); /* 20 */
+  const char *const values[] = {"0", "1", "Az09", "Abcdefgh01234567XYZ"};
+  for (unsigned test = 0; test < sizeof(values)/sizeof(values[0]); ++test)
+  {
+    unsigned start = keyboard_count;
+    assert(Login_RequestPassword(values[test])); PollLogin(0, 1000);
+    assert(Login_GetState() == LOGIN_SENT);
+    unsigned pressed = 0; bool released = true;
+    for (unsigned i = start; i < keyboard_count; ++i)
+    {
+      if (keyboard_history[i][3] != 0)
+      {
+        assert(released); released = false; ++pressed;
+        if (test == 0 && pressed == 1) assert(keyboard_history[i][3] == 0x27);
+        if (test == 1 && pressed == 1) assert(keyboard_history[i][3] == 0x1E);
+        if (pressed == strlen(values[test]) + 1U) assert(keyboard_history[i][3] == 0x28);
+      }
+      else
+      {
+        for (unsigned byte = 1; byte < 9; ++byte) assert(keyboard_history[i][byte] == 0);
+        released = true;
+      }
+    }
+    assert(released && pressed == strlen(values[test]) + 1U);
+  }
+  puts("PASS: custom 1/19-character passwords, literal 0/1, invalid character/length rejection and Enter/key releases.");
 }
 
 int main(int argc, char **argv)
@@ -477,12 +489,8 @@ int main(int argc, char **argv)
   assert(!Send_Mouse_Action(0, 0, 0, 0));
   if (argc > 1)
   {
-    if (strcmp(argv[1], "disabled") == 0)
-    {
-      Enumerate(); SynchronizeMouse(0);
-      assert(Login_GetState() == LOGIN_DISABLED && !Login_OnFingerprintMatch(0));
-      puts("PASS: build without local credentials disables login.");
-    }
+    if (strcmp(argv[1], "passwords") == 0)
+      TestPasswordBoundaries();
     else if (strcmp(argv[1], "caps") == 0)
       TestLoginSequence(true);
     else
@@ -491,7 +499,7 @@ int main(int argc, char **argv)
   }
   Enumerate();
   TestDescriptors(); TestButtons(); TestMouseTransport();
-  TestKeyboardAndControl(); TestSide1WindowsKey(); TestReconnect();
+  TestKeyboardAndControl(); TestSideMacros(); TestReconnect();
   TestLoginSequence(false);
   return 0;
 }

@@ -24,5 +24,7 @@ typedef struct {
 /* SPI2 has one task owner. Call these functions from the motion task. */
 Pmw3360Status Pmw3360_Init(SPI_HandleTypeDef *spi, uint16_t cpi);
 Pmw3360Status Pmw3360_ReadMotion(Pmw3360Motion *motion);
+/* Motion-task owner only; updates CPI without resetting/uploading SROM. */
+Pmw3360Status Pmw3360_SetCpi(uint16_t cpi);
 
 #endif

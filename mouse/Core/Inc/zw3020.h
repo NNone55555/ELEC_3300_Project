@@ -37,5 +37,7 @@ int16_t Zw3020_Store(uint16_t id);
 int16_t Zw3020_Search(uint16_t capacity, Zw3020Match *match);
 int16_t Zw3020_FindFreeSlot(uint16_t capacity, uint16_t *id);
 uint8_t Zw3020_LastCommand(void);
+int16_t Zw3020_Delete(uint16_t id);
+int16_t Zw3020_IsOccupied(uint16_t id, bool *occupied);
 
 #endif

@@ -4,13 +4,14 @@
 #include "usb_hid_controller.h"
 #include "mouse_buttons.h"
 #include "login_typing.h"
+#include "user_profile.h"
 #include "usb_device.h"
 #include "usbd_hid.h"
 #include <limits.h>
 #include <string.h>
 
 #define BUTTON_QUEUE_SIZE 32U
-#define KEYBOARD_MODIFIER_LEFT_GUI (1U << 3)
+#define SIDE_BITS (MOUSE_BUTTON_SIDE1 | MOUSE_BUTTON_SIDE2)
 
 _Static_assert(sizeof(MouseReport) == HID_MOUSE_REPORT_SIZE, "Mouse report layout");
 _Static_assert(sizeof(KeyboardReport) == HID_KEYBOARD_REPORT_SIZE, "Keyboard report layout");
@@ -26,9 +27,39 @@ static uint8_t reported_buttons;
 static bool connected;
 static uint32_t active_session;
 static uint32_t button_overflows;
-static bool reported_windows_key;
 static bool keyboard_sync_pending;
-static bool windows_inhibited;
+static bool macro_release_pending;
+static uint8_t processed_sides, inhibited_sides;
+static uint8_t side_macros[2] = {MACRO_BACK, MACRO_FORWARD};
+static uint32_t macro_revision, applied_macro_revision;
+
+void UsbHid_SetSideMacros(uint8_t side1, uint8_t side2)
+{
+  if (side1 >= MACRO_COUNT || side2 >= MACRO_COUNT) return;
+  uint32_t irq = __get_PRIMASK(); __disable_irq();
+  if (side_macros[0] != side1 || side_macros[1] != side2)
+  {side_macros[0] = side1; side_macros[1] = side2; ++macro_revision;}
+  __set_PRIMASK(irq);
+}
+void UsbHid_GetSideMacros(uint8_t *side1, uint8_t *side2)
+{
+  uint32_t irq = __get_PRIMASK(); __disable_irq();
+  if (side1 != NULL) *side1 = side_macros[0];
+  if (side2 != NULL) *side2 = side_macros[1];
+  __set_PRIMASK(irq);
+}
+
+static uint8_t MouseButtons(uint8_t physical)
+{
+  uint8_t mapped = physical & 7U;
+  for (unsigned side = 0; side < 2U; ++side)
+    if (physical & (MOUSE_BUTTON_SIDE1 << side))
+    {
+      if (side_macros[side] == MACRO_BACK) mapped |= MOUSE_BUTTON_SIDE1;
+      if (side_macros[side] == MACRO_FORWARD) mapped |= MOUSE_BUTTON_SIDE2;
+    }
+  return mapped;
+}
 
 bool Send_Mouse_Action(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
@@ -93,92 +124,76 @@ static void QueueButtons(uint8_t buttons)
 void UsbHid_ServiceMouse(uint8_t buttons)
 {
   buttons &= 0x1FU;
-  uint32_t interrupt_state = __get_PRIMASK();
-  __disable_irq();
+  uint8_t held_sides = buttons & SIDE_BITS;
+  uint32_t irq = __get_PRIMASK(); __disable_irq();
   bool configured = UsbHid_IsConfigured();
   uint32_t session = USBD_HID_GetSession();
-  if (!configured || !connected || active_session != session)
+  if (!configured || !connected || active_session != session || applied_macro_revision != macro_revision)
   {
-    connected = configured;
-    active_session = session;
-    pending_x = pending_y = pending_wheel = 0;
-    queue_head = queue_count = 0U;
+    bool remapping = applied_macro_revision != macro_revision;
+    bool new_session = !configured || !connected || active_session != session;
+    connected = configured; active_session = session; applied_macro_revision = macro_revision;
+    if (new_session)
+      pending_x = pending_y = pending_wheel = 0;
+    queue_head = queue_count = 0U; reported_buttons = 0U;
+    processed_sides = 0U; macro_release_pending = false; keyboard_sync_pending = true;
+    if (remapping) inhibited_sides |= buttons & SIDE_BITS;
+    buttons &= (uint8_t)~inhibited_sides;
     observed_buttons = buttons;
-    reported_buttons = 0U;
-    reported_windows_key = false;
-    keyboard_sync_pending = true;
-    if (configured)
-      QueueButtons(buttons); /* Resynchronize actual held buttons after enumeration. */
+    if (configured) QueueButtons(buttons);
   }
   if (!configured)
   {
-    Login_OnUsbUnavailable();
-    __set_PRIMASK(interrupt_state);
-    return;
+    Login_OnUsbUnavailable(); __set_PRIMASK(irq); return;
   }
   bool login_owns_keyboard = Login_Service();
   if (login_owns_keyboard)
   {
-    windows_inhibited = true;
-    reported_windows_key = false;
-    keyboard_sync_pending = true;
-  }
-  if (windows_inhibited)
-  {
-    /* Discard queued GUI edges during login; require a fresh press afterward.
-     * Mouse buttons and motion continue while password key reports are paced.
+    inhibited_sides |= held_sides;
+    for (uint8_t i = 0; i < queue_count; ++i)
+      button_queue[(queue_head + i) % BUTTON_QUEUE_SIZE] &= (uint8_t)~SIDE_BITS;
+    observed_buttons &= (uint8_t)~SIDE_BITS;
+    /* A host may still hold a Back/Forward mouse button. Queue its release
+     * even when no motion or other button change occurs during typing.
      */
-    for (uint8_t i = 0U; i < queue_count; ++i)
-      button_queue[(queue_head + i) % BUTTON_QUEUE_SIZE] &= (uint8_t)~MOUSE_BUTTON_SIDE1;
-    observed_buttons &= (uint8_t)~MOUSE_BUTTON_SIDE1;
-    reported_buttons &= (uint8_t)~MOUSE_BUTTON_SIDE1;
-    if (!login_owns_keyboard && (buttons & MOUSE_BUTTON_SIDE1) == 0U)
-      windows_inhibited = false;
-    buttons &= (uint8_t)~MOUSE_BUTTON_SIDE1;
+    if ((reported_buttons & SIDE_BITS) != 0U && queue_count == 0U)
+      QueueButtons(buttons & (uint8_t)~SIDE_BITS);
+    macro_release_pending = false; processed_sides = 0U; keyboard_sync_pending = true;
+    buttons &= (uint8_t)~SIDE_BITS;
   }
-  if (buttons != observed_buttons)
+  inhibited_sides &= held_sides;
+  buttons &= (uint8_t)~inhibited_sides;
+  if (buttons != observed_buttons) {QueueButtons(buttons); observed_buttons = buttons;}
+  uint8_t physical = queue_count ? button_queue[queue_head] : reported_buttons;
+  const uint8_t no_keys[6] = {0};
+  if (!login_owns_keyboard && (keyboard_sync_pending || macro_release_pending))
   {
-    QueueButtons(buttons);
-    observed_buttons = buttons;
+    if (Send_Keyboard_Action(0, no_keys)) {keyboard_sync_pending = false; macro_release_pending = false;}
+    __set_PRIMASK(irq); return;
   }
-  uint8_t report_buttons = queue_count != 0U ? button_queue[queue_head] : reported_buttons;
-  bool windows_key = (report_buttons & MOUSE_BUTTON_SIDE1) != 0U;
-  if (!login_owns_keyboard && (keyboard_sync_pending || windows_key != reported_windows_key))
+  if (!login_owns_keyboard)
   {
-    /* Keep this edge queued until both its keyboard and mouse state are sent.
-     * A quick tap during USB BUSY must still deliver Windows down, then up.
-     */
-    const uint8_t keys[6] = {0};
-    if (Send_Keyboard_Action(windows_key ? KEYBOARD_MODIFIER_LEFT_GUI : 0U, keys))
+    uint8_t rising = physical & (uint8_t)~reported_buttons & SIDE_BITS & (uint8_t)~processed_sides;
+    for (unsigned side = 0; side < 2U; ++side)
     {
-      reported_windows_key = windows_key;
-      keyboard_sync_pending = false;
-    }
-    __set_PRIMASK(interrupt_state);
-    return;
-  }
-  int8_t x = ReportDelta(pending_x);
-  int8_t y = ReportDelta(pending_y);
-  int8_t wheel = ReportDelta(pending_wheel);
-  bool send = queue_count != 0U || x != 0 || y != 0 || wheel != 0;
-  /* This nested critical section stays short: one <=5-byte USB PMA copy.
-   * It prevents a task switch adding motion or a USB reset halfway through.
-   */
-  /* Side 1 is the Windows key for this test; suppress its mouse Back button. */
-  uint8_t mouse_buttons = report_buttons & (uint8_t)~MOUSE_BUTTON_SIDE1;
-  if (send && Send_Mouse_Action(mouse_buttons, x, y, wheel))
-  {
-    pending_x -= x;
-    pending_y -= y;
-    pending_wheel -= wheel;
-    reported_buttons = report_buttons;
-    if (queue_count != 0U)
-    {
-      queue_head = (queue_head + 1U) % BUTTON_QUEUE_SIZE;
-      --queue_count;
+      uint8_t bit = MOUSE_BUTTON_SIDE1 << side;
+      uint8_t macro = side_macros[side];
+      if ((rising & bit) && macro >= MACRO_COPY && macro <= MACRO_SELECT_ALL)
+      {
+        static const uint8_t usages[] = {0x06, 0x19, 0x1D, 0x04};
+        uint8_t keys[6] = {usages[macro - MACRO_COPY]};
+        if (Send_Keyboard_Action(1U, keys)) {processed_sides |= bit; macro_release_pending = true;}
+        __set_PRIMASK(irq); return;
+      }
     }
   }
-  __set_PRIMASK(interrupt_state);
+  int8_t x = ReportDelta(pending_x), y = ReportDelta(pending_y), wheel = ReportDelta(pending_wheel);
+  if ((queue_count || x || y || wheel) && Send_Mouse_Action(MouseButtons(physical), x, y, wheel))
+  {
+    pending_x -= x; pending_y -= y; pending_wheel -= wheel; reported_buttons = physical;
+    if (queue_count) {queue_head = (queue_head + 1U) % BUTTON_QUEUE_SIZE; --queue_count; processed_sides = 0;}
+  }
+  __set_PRIMASK(irq);
 }
 
 uint32_t UsbHid_GetButtonOverflows(void)

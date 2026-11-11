@@ -128,6 +128,7 @@ NVIC.TIM4_IRQn=true\:15\:0\:false\:false\:true\:false\:false\:true\:true
 NVIC.TimeBase=TIM4_IRQn
 NVIC.TimeBaseIP=TIM4
 NVIC.USART2_IRQn=true\:5\:0\:false\:false\:true\:true\:true\:true\:true
+NVIC.USART1_IRQn=true\:5\:0\:false\:false\:true\:true\:true\:true\:true
 NVIC.USB_LP_CAN1_RX0_IRQn=true\:5\:0\:false\:false\:true\:false\:true\:true\:true
 NVIC.UsageFault_IRQn=true\:0\:0\:false\:false\:true\:false\:false\:false\:false
 OSC_IN.Mode=HSE-External-Oscillator

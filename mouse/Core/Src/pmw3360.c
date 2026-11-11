@@ -178,6 +178,17 @@ static int16_t SignedDelta(uint8_t low, uint8_t high)
   return (int16_t)value;
 }
 
+Pmw3360Status Pmw3360_SetCpi(uint16_t cpi)
+{
+  if (sensor_spi == NULL || cpi < 100U || cpi > 12000U || cpi % 100U != 0U)
+    return PMW3360_CONFIG_ERROR;
+  uint8_t expected = (uint8_t)(cpi / 100U - 1U), actual;
+  if (WriteRegister(REG_CONFIG1, expected) != HAL_OK || ReadRegister(REG_CONFIG1, &actual) != HAL_OK
+      || actual != expected || WriteRegister(REG_MOTION_BURST, 0U) != HAL_OK)
+    return PMW3360_CONFIG_ERROR;
+  return PMW3360_OK;
+}
+
 Pmw3360Status Pmw3360_ReadMotion(Pmw3360Motion *motion)
 {
   uint8_t command = REG_MOTION_BURST;

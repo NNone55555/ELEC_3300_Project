@@ -29,10 +29,12 @@ bool UsbHid_IsConfigured(void);
 
 /* Motion task adds deltas; one USB task services the mouse every millisecond.
  * Counts larger than the signed 8-bit report are drained over several reports.
- * Side 1 is mapped to Left GUI (Windows), with a release when the switch lifts.
+ * Side actions use compact profile macro IDs; keyboard chords always release.
  */
 void UsbHid_AddMotion(int16_t x, int16_t y, int32_t wheel);
 void UsbHid_ServiceMouse(uint8_t buttons);
 uint32_t UsbHid_GetButtonOverflows(void);
+void UsbHid_SetSideMacros(uint8_t side1, uint8_t side2);
+void UsbHid_GetSideMacros(uint8_t *side1, uint8_t *side2);
 
 #endif

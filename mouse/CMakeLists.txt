@@ -56,18 +56,22 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/login_typing.c
     Core/Src/ws2812b.c
     Core/Src/ws2812b_task.c
+    Core/Src/user_profile.c
+    Core/Src/at24c02.c
+    Core/Src/profile_storage.c
+    Core/Src/console_uart.c
+    Core/Src/fingerprint_service.c
+    Core/Src/profile_manager.c
+    Core/Src/config_menu.c
 )
 
-option(MOUSE_WS2812B_DEMO "Run the independent WS2812B color/animation demonstration" ON)
+option(MOUSE_WS2812B_DEMO "Run the independent WS2812B color/animation demonstration" OFF)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     MOUSE_WS2812B_DEMO=$<BOOL:${MOUSE_WS2812B_DEMO}>
 )
 
-# Credentials stay local; a fresh clone builds with login disabled.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/private/login_credentials.h")
-    target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE private)
-    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE MOUSE_HAS_LOGIN_CREDENTIALS=1)
-endif()
+# Passwords are configured through UART and stored in prototype EEPROM records.
+# The old private/login_credentials.h is preserved locally but is not compiled.
 
 # Native STM32F103 USB, kept separate from CubeMX's generated CMake list.
 include(cmake/usb_device.cmake)
