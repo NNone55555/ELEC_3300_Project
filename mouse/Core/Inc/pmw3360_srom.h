@@ -18,7 +18,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-/* Extracted SROM bytes only; SPI/HAL test code is in pmw3360_test.c.
+/* Extracted SROM bytes only; the SPI/HAL driver is in pmw3360.c.
  * Upstream: SunjunKim/PMW3360 commit 03b8b9a3666b68c7ac78493b0c2ccd95788b504f
  * See third_party/pmw3360/README.md and COPYING.LESSER.
  */
