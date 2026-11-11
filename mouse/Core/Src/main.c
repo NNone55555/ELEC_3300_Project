@@ -26,6 +26,8 @@
 #include "mouse_app.h"
 #include "zw3020.h"
 #include "usb_device.h"
+#include "ws2812b.h"
+#include "ws2812b_task.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -160,6 +162,11 @@ int main(void)
   if (defaultTaskHandle == NULL || !MouseApp_Init(&hspi2, &huart2, &huart1))
   {
     LCD_DrawString(0, 20, "RTOS/sensor startup failed");
+    Error_Handler();
+  }
+  if (!WS2812B_TaskStart(&htim1))
+  {
+    LCD_DrawString(0, 40, "LED task/config startup failed");
     Error_Handler();
   }
   /* USER CODE END RTOS_THREADS */
@@ -696,6 +703,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
 {
   Zw3020_OnUartError(uart);
+}
+
+void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *timer)
+{
+  WS2812B_OnPulseFinished(timer);
+}
+
+void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *timer)
+{
+  WS2812B_OnTimerError(timer);
 }
 /* USER CODE END 4 */
 

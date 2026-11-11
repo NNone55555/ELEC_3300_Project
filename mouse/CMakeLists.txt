@@ -54,6 +54,13 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/mouse_buttons.c
     Core/Src/usb_hid_controller.c
     Core/Src/login_typing.c
+    Core/Src/ws2812b.c
+    Core/Src/ws2812b_task.c
+)
+
+option(MOUSE_WS2812B_DEMO "Run the independent WS2812B color/animation demonstration" ON)
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+    MOUSE_WS2812B_DEMO=$<BOOL:${MOUSE_WS2812B_DEMO}>
 )
 
 # Credentials stay local; a fresh clone builds with login disabled.
