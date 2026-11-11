@@ -1,8 +1,12 @@
 # Generated build output
-/build/
-/Debug/
-/Release/
-/cmake-build-*/
+# Applies to both mouse/ and receiver/ at any depth.
+build/
+Debug/
+Release/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
 *.o
 *.obj
 *.elf
@@ -25,4 +29,4 @@ Thumbs.db
 
 # Documents
 *.pdf
-log/*.md
+**/log/*.md
