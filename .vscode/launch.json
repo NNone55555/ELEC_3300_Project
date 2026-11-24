@@ -5,7 +5,9 @@
             "name": "Flash active CMake target (ST-Link)",
             "type": "stlinkgdbtarget",
             "request": "launch",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${config:cmake.sourceDirectory}",
+            "deviceName": "STM32F103VET6",
+            "deviceCore": "Cortex-M3",
             "preBuild": "",
             "runEntry": "main",
             "imagesAndSymbols": [
