@@ -138,7 +138,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   LCD_INIT();
   LCD_DrawString(0, 0, "Starting mouse sensors...");
-  MX_USB_DEVICE_Init();
   if (!BatteryMonitor_Init(&hadc1))
     LCD_DrawString(0, 60, "Battery ADC calibration failed");
   /* USER CODE END 2 */
@@ -789,6 +788,8 @@ void HAL_TIM_ErrorCallback(TIM_HandleTypeDef *timer)
 /* USER CODE END Header_StartDefaultTask */
 void StartDefaultTask(void *argument)
 {
+  /* init code for USB_DEVICE */
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 5 */
   (void)argument;
   MouseApp_RunDisplay();

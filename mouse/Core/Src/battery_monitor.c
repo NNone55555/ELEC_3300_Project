@@ -2,7 +2,7 @@
 #include "ws2812b.h"
 
 #ifndef BATTERY_POT_DEMO
-// #define BATTERY_POT_DEMO 1 /* Comment out this line for the real battery divider. */
+#define BATTERY_POT_DEMO 1 /* Uncomment this line for demo using potentiometer */
 #endif
 
 #define ADC_MAX_COUNT 4095U

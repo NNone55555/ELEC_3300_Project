@@ -69,7 +69,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 # Passwords are configured through UART and stored in prototype EEPROM records.
 # The old private/login_credentials.h is preserved locally but is not compiled.
 
-# Keep the mouse and keyboard HID class when CubeMX generates USB sources.
+# Build the mouse's USB implementation from usb/ after CubeMX generation.
 include(cmake/usb_device.cmake)
 
 # Add include paths
