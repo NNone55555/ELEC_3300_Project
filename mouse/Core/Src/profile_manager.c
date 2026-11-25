@@ -103,6 +103,10 @@ bool ProfileManager_GetActive(UserProfile *p)
     *p = active;
   return true;
 }
+uint16_t ProfileManager_GetActiveId(void)
+{
+  return active_valid ? active.fingerprint_id : UINT16_MAX;
+}
 bool ProfileManager_CanRegister(void)
 {
   UserProfile p;

@@ -294,6 +294,12 @@ uint32_t USBD_HID_GetSession(void)
   return session;
 }
 
+void USBD_HID_OnSuspend(void)
+{
+  /* Invalidate input even if suspend/resume completes between loop passes. */
+  ++session;
+}
+
 uint8_t USBD_HID_GetKeyboardLeds(void)
 {
   return hid.led_output[1];

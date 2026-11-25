@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "lcd.h"
 #include "nrf_motion.h"
+#include "wireless_rx.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -62,54 +63,46 @@ static void MX_SPI1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void ShowRadioTest(void)
+static void DrawStatusLine(uint8_t row, const char *text)
 {
-  static uint32_t packets;
-  static uint32_t last_packet;
-  static uint32_t last_display;
-  static int16_t last_x;
-  static int16_t last_y;
-  static bool received;
-  bool spi_error = false;
-
-  /* Drain at most one full RX FIFO per pass. Zero deltas are heartbeats. */
-  for (unsigned i = 0; i < 3U; ++i)
+  static char lines[3][30];
+  for (unsigned col = 0; col < sizeof(lines[0]); ++col)
   {
-    int16_t dx, dy;
-    NrfMotionRxResult result = NrfMotion_Read(&dx, &dy);
-    if (result != NRF_RX_PACKET)
+    char next = *text == '\0' ? ' ' : *text++;
+    if (lines[row][col] != next)
     {
-      spi_error = result == NRF_RX_ERROR;
-      break;
-    }
-    ++packets;
-    received = true;
-    last_packet = HAL_GetTick();
-    if (dx != 0 || dy != 0)
-    {
-      last_x = dx;
-      last_y = dy;
+      LCD_DrawChar(col * 8U, (row + 1U) * 16U, next);
+      lines[row][col] = next;
     }
   }
+}
 
+static void ShowWirelessStatus(void)
+{
+  static uint32_t last_display;
   uint32_t now = HAL_GetTick();
-  if ((uint32_t)(now - last_display) < 100U)
+  if ((uint32_t)(now - last_display) < 250U)
     return;
-
   last_display = now;
-  const char *status = "nRF: waiting for mouse";
-  if (spi_error)
-    status = "nRF: SPI/init error";
-  else if (received)
-    status = (uint32_t)(now - last_packet) < 1000U ? "nRF: receiving" : "nRF: link lost";
+  WirelessRxStatus status = WirelessRx_GetStatus();
+  const char *link = "nRF: waiting for mouse";
+  if (status.radio_error) link = "nRF: SPI/init error";
+  else if (!status.usb_ready) link = "USB: waiting for PC";
+  else if (status.linked) link = "nRF HID: linked";
+  else if (status.accepted != 0U) link = "nRF: link lost";
+  DrawStatusLine(0, link);
 
-  char line[31];
-  snprintf(line, sizeof(line), "%-30s", status);
-  LCD_DrawString(0, 16, line);
-  snprintf(line, sizeof(line), "X: %+6d  Y: %+6d", (int)last_x, (int)last_y);
-  LCD_DrawString(0, 32, line);
-  snprintf(line, sizeof(line), "Packets: %10lu", (unsigned long)packets);
-  LCD_DrawString(0, 48, line);
+  char line[40];
+  if (status.user_id == WIRELESS_NO_USER)
+    DrawStatusLine(1, "User: none");
+  else
+  {
+    snprintf(line, sizeof(line), "User ID: %u", (unsigned)status.user_id);
+    DrawStatusLine(1, line);
+  }
+  snprintf(line, sizeof(line), "RX:%lu Dup:%lu", (unsigned long)status.accepted,
+           (unsigned long)status.duplicates);
+  DrawStatusLine(2, line);
 }
 /* USER CODE END 0 */
 
@@ -158,8 +151,9 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    ShowRadioTest();
-    HAL_Delay(1U);
+    WirelessRx_Service();
+    ShowWirelessStatus();
+    __WFI(); /* SysTick or a USB interrupt wakes the polling loop. */
   }
   /* USER CODE END 3 */
 }

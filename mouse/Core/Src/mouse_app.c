@@ -11,6 +11,7 @@
 #include "fingerprint_service.h"
 #include "battery_monitor.h"
 #include "nrf_motion.h"
+#include "wireless_tx.h"
 #include "lcd.h"
 #include "main.h"
 #include "cmsis_os2.h"
@@ -23,7 +24,6 @@
 #define DEFAULT_CPI 800U
 #define MOTION_PERIOD_TICKS 5U
 #define OPTICAL_RETRY_MS 2000U
-#define RADIO_TEST_INTERVAL_MS 50U
 #define FP_CONTROL_FLAG 1U
 #define DISPLAY_ROWS 20U
 #define DISPLAY_COLUMNS 30U
@@ -73,7 +73,7 @@ static const osThreadAttr_t fingerprint_attributes = {
   .priority = osPriorityNormal
 };
 static const osThreadAttr_t usb_attributes = {
-  .name = "wiredMouse",
+  .name = "mouseInput",
   .stack_size = 1536,
   .priority = osPriorityHigh
 };
@@ -90,35 +90,6 @@ static int32_t AddCounts(int32_t current, int16_t delta)
     return INT32_MIN;
   }
   return (int32_t)sum;
-}
-
-static int16_t LimitRadioDelta(int32_t delta)
-{
-  if (delta > INT16_MAX) return INT16_MAX;
-  if (delta < INT16_MIN) return INT16_MIN;
-  return (int16_t)delta;
-}
-
-/* One signed X/Y pair per interval. A zero pair keeps the link visible at rest. */
-static void RunRadioTest(int16_t dx, int16_t dy)
-{
-  static uint32_t last_send;
-  static int32_t accumulated_x;
-  static int32_t accumulated_y;
-  NrfMotion_PollTx();
-  NrfMotionTxState state = NrfMotion_GetTxState();
-  if (state == NRF_TX_UNAVAILABLE)
-    return;
-
-  accumulated_x = AddCounts(accumulated_x, dx);
-  accumulated_y = AddCounts(accumulated_y, dy);
-  uint32_t now = HAL_GetTick();
-  if (state != NRF_TX_PENDING && (uint32_t)(now - last_send) >= RADIO_TEST_INTERVAL_MS)
-  {
-    (void)NrfMotion_StartTx(LimitRadioDelta(accumulated_x), LimitRadioDelta(accumulated_y));
-    last_send = now;
-    accumulated_x = accumulated_y = 0;
-  }
 }
 
 void MouseApp_SampleInputs1ms(void)
@@ -181,8 +152,6 @@ static void MotionTask(void *argument)
     }
 
     UsbHid_AddMotion(motion.dx, motion.dy, 0);
-    RunRadioTest(optical_status == PMW3360_OK ? motion.dx : 0,
-                 optical_status == PMW3360_OK ? motion.dy : 0);
     osMutexAcquire(status_mutex, osWaitForever);
     shared_status.optical_status = optical_status;
     shared_status.motion = motion;
@@ -203,7 +172,7 @@ static void MotionTask(void *argument)
   }
 }
 
-static void WiredMouseTask(void *argument)
+static void InputTask(void *argument)
 {
   (void)argument;
   uint32_t next_wake = osKernelGetTickCount();
@@ -223,6 +192,7 @@ static void WiredMouseTask(void *argument)
     int32_t wheel = scroll_delta > INT32_MAX ? INT32_MAX
                     : scroll_delta < INT32_MIN ? INT32_MIN : (int32_t)scroll_delta;
     previous_scroll = encoder.steps;
+    WirelessTx_Service(!UsbHid_IsWired());
     UsbHid_AddMotion(0, 0, wheel);
     UsbHid_ServiceMouse(buttons.pressed);
     osMutexAcquire(status_mutex, osWaitForever);
@@ -283,7 +253,7 @@ bool MouseApp_Init(SPI_HandleTypeDef *optical_spi, UART_HandleTypeDef *fingerpri
 
   fingerprint_thread = osThreadNew(FingerprintTask, NULL, &fingerprint_attributes);
   motion_thread = osThreadNew(MotionTask, NULL, &motion_attributes);
-  usb_thread = osThreadNew(WiredMouseTask, NULL, &usb_attributes);
+  usb_thread = osThreadNew(InputTask, NULL, &usb_attributes);
   return fingerprint_thread != NULL && motion_thread != NULL && usb_thread != NULL;
 }
 
@@ -339,7 +309,7 @@ static void RenderLine(uint8_t row, const char *text)
 static void RenderStatus(const MouseStatus *status)
 {
   char text[80];
-  RenderLine(0, "ELEC3300 wired USB mouse");
+  RenderLine(0, "ELEC3300 mouse");
   RenderLine(1, "USART1: config + Enter");
   RenderLine(2, FingerprintStateText(status->fingerprint.state));
   const FingerprintController *fp = &status->fingerprint;
@@ -392,7 +362,10 @@ static void RenderStatus(const MouseStatus *status)
              (unsigned)status->buttons.pin_levels,
              (unsigned long)UsbHid_GetButtonOverflows());
   RenderLine(15, text);
-  RenderLine(16, UsbHid_IsConfigured() ? "USB: mouse + keyboard ready" : "USB: waiting / suspended");
+  if (UsbHid_IsWired())
+    RenderLine(16, "HID: wired USB");
+  else
+    RenderLine(16, WirelessTx_IsReady() ? "HID: wireless ready" : "HID: waiting for receiver");
   RenderLine(17, Login_GetStatusText());
   int32_t raw_adc = BatteryMonitor_GetRaw();
   unsigned long heap_free = (unsigned long)xPortGetFreeHeapSize();
@@ -418,6 +391,7 @@ void MouseApp_RunDisplay(void)
     Console_Service();
     ConfigMenu_Poll();
     ProfileManager_Update();
+    WirelessTx_SetUserId(ProfileManager_GetActiveId());
     MouseStatus snapshot;
     osMutexAcquire(status_mutex, osWaitForever);
     snapshot = shared_status;

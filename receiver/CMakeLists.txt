@@ -50,7 +50,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/lcd.c
     Core/Src/usb_hid_controller.c
+    Core/Src/wireless_rx.c
     ../shared/nrf_motion.c
+    ../shared/wireless_packet.c
 )
 
 # Add include paths

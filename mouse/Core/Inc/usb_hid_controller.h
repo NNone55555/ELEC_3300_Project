@@ -25,10 +25,14 @@ typedef struct {
  */
 bool Send_Mouse_Action(uint8_t buttons, int8_t x, int8_t y, int8_t wheel);
 bool Send_Keyboard_Action(uint8_t modifiers, const uint8_t keys[6]);
+/* The active input route is local USB when configured, otherwise the radio. */
 bool UsbHid_IsConfigured(void);
+bool UsbHid_IsWired(void);
+uint32_t UsbHid_GetInputSession(void);
+uint8_t UsbHid_GetInputKeyboardLeds(void);
 
-/* Motion task adds deltas; one USB task services the mouse every millisecond.
- * Counts larger than the signed 8-bit report are drained over several reports.
+/* Motion task adds deltas; one input task services the chosen transport.
+ * Each transport splits movement to fit its report range.
  * Side actions use compact profile macro IDs; keyboard chords always release.
  */
 void UsbHid_AddMotion(int16_t x, int16_t y, int32_t wheel);

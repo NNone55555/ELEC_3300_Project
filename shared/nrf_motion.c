@@ -5,7 +5,10 @@
 #define NRF_R_REGISTER 0x00U
 #define NRF_W_REGISTER 0x20U
 #define NRF_R_RX_PAYLOAD 0x61U
+#define NRF_R_RX_PL_WID 0x60U
 #define NRF_W_TX_PAYLOAD 0xA0U
+#define NRF_W_ACK_PAYLOAD_P0 0xA8U
+#define NRF_ACTIVATE 0x50U
 #define NRF_FLUSH_TX 0xE1U
 #define NRF_FLUSH_RX 0xE2U
 
@@ -32,7 +35,8 @@
 #define STATUS_MAX_RT 0x10U
 #define STATUS_TX_FLAGS (STATUS_TX_DS | STATUS_MAX_RT)
 #define FIFO_RX_EMPTY 0x01U
-#define PAYLOAD_SIZE 4U
+#define FIFO_TX_FULL 0x20U
+#define FEATURE_ACK_PAYLOADS 0x06U /* EN_DPL | EN_ACK_PAY. */
 #define SPI_TIMEOUT_MS 2U
 #define TX_TIMEOUT_MS 15U
 
@@ -49,7 +53,7 @@ static void SetCe(GPIO_PinState level)
 
 static bool Transfer(uint8_t command, const uint8_t *out, uint8_t *in, uint16_t size)
 {
-  uint8_t tx[1U + sizeof(address)] = {command};
+  uint8_t tx[1U + WIRELESS_PACKET_SIZE] = {command};
   uint8_t rx[sizeof(tx)];
   if (out != NULL)
     memcpy(&tx[1], out, size);
@@ -77,6 +81,23 @@ static bool CheckRegister(uint8_t reg, const uint8_t *expected, uint16_t size)
          && memcmp(readback, expected, size) == 0;
 }
 
+static bool EnableAckPayloads(void)
+{
+  const uint8_t features = FEATURE_ACK_PAYLOADS;
+  if (!WriteRegister(NRF_FEATURE, features))
+    return false;
+  if (!CheckRegister(NRF_FEATURE, &features, 1U))
+  {
+    const uint8_t activate = 0x73U;
+    if (!Transfer(NRF_ACTIVATE, &activate, NULL, 1U)
+        || !WriteRegister(NRF_FEATURE, features)
+        || !CheckRegister(NRF_FEATURE, &features, 1U))
+      return false;
+  }
+  const uint8_t pipe0 = 1U;
+  return WriteRegister(NRF_DYNPD, pipe0) && CheckRegister(NRF_DYNPD, &pipe0, 1U);
+}
+
 bool NrfMotion_Init(SPI_HandleTypeDef *spi, NrfMotionRole role)
 {
   const uint8_t config = CONFIG_POLLING_CRC16 | CONFIG_PWR_UP
@@ -88,9 +109,7 @@ bool NrfMotion_Init(SPI_HandleTypeDef *spi, NrfMotionRole role)
     {NRF_SETUP_RETR, 0x23U}, /* 750 us retry delay, up to three retries. */
     {NRF_RF_CH, 76U},
     {NRF_RF_SETUP, 0x00U},   /* 1 Mbit/s, lowest radio drive for bench use. */
-    {NRF_DYNPD, 0x00U},
-    {NRF_FEATURE, 0x00U},
-    {NRF_RX_PW_P0, PAYLOAD_SIZE}
+    {NRF_RX_PW_P0, WIRELESS_PACKET_SIZE}
   };
 
   radio_spi = spi;
@@ -109,7 +128,8 @@ bool NrfMotion_Init(SPI_HandleTypeDef *spi, NrfMotionRole role)
       return false;
   }
 
-  if (!Transfer(NRF_W_REGISTER | NRF_RX_ADDR_P0, address, NULL, sizeof(address))
+  if (!EnableAckPayloads()
+      || !Transfer(NRF_W_REGISTER | NRF_RX_ADDR_P0, address, NULL, sizeof(address))
       || !CheckRegister(NRF_RX_ADDR_P0, address, sizeof(address))
       || !Transfer(NRF_W_REGISTER | NRF_TX_ADDR, address, NULL, sizeof(address))
       || !CheckRegister(NRF_TX_ADDR, address, sizeof(address))
@@ -133,20 +153,15 @@ bool NrfMotion_Init(SPI_HandleTypeDef *spi, NrfMotionRole role)
   return true;
 }
 
-bool NrfMotion_StartTx(int16_t dx, int16_t dy)
+bool NrfMotion_StartTx(const uint8_t payload[WIRELESS_PACKET_SIZE])
 {
   if (tx_state == NRF_TX_UNAVAILABLE || tx_state == NRF_TX_PENDING)
     return false;
 
-  /* On the wire: signed little-endian X followed by signed little-endian Y. */
-  uint16_t x = (uint16_t)dx;
-  uint16_t y = (uint16_t)dy;
-  const uint8_t payload[PAYLOAD_SIZE] = {
-    (uint8_t)x, (uint8_t)(x >> 8), (uint8_t)y, (uint8_t)(y >> 8)
-  };
   if (!Transfer(NRF_FLUSH_TX, NULL, NULL, 0U)
-      || !WriteRegister(NRF_STATUS, STATUS_TX_FLAGS)
-      || !Transfer(NRF_W_TX_PAYLOAD, payload, NULL, sizeof(payload)))
+      || !Transfer(NRF_FLUSH_RX, NULL, NULL, 0U)
+      || !WriteRegister(NRF_STATUS, STATUS_TX_FLAGS | STATUS_RX_DR)
+      || !Transfer(NRF_W_TX_PAYLOAD, payload, NULL, WIRELESS_PACKET_SIZE))
   {
     tx_state = NRF_TX_ERROR;
     return false;
@@ -191,27 +206,43 @@ NrfMotionTxState NrfMotion_GetTxState(void)
   return tx_state;
 }
 
-static int16_t DecodeAxis(const uint8_t *bytes)
+static NrfMotionRxResult ReadPayload(uint8_t payload[WIRELESS_PACKET_SIZE])
 {
-  uint16_t value = (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
-  return value <= INT16_MAX ? (int16_t)value : (int16_t)((int32_t)value - 65536);
-}
-
-NrfMotionRxResult NrfMotion_Read(int16_t *dx, int16_t *dy)
-{
-  uint8_t fifo;
-  if (!rx_ready || !Transfer(NRF_R_REGISTER | NRF_FIFO_STATUS, NULL, &fifo, 1U)
+  uint8_t fifo, size;
+  if (!Transfer(NRF_R_REGISTER | NRF_FIFO_STATUS, NULL, &fifo, 1U)
       || (fifo & 0x8CU) != 0U) /* Reserved bits are zero, even when RX is empty. */
     return NRF_RX_ERROR;
   if ((fifo & FIFO_RX_EMPTY) != 0U)
     return NRF_RX_EMPTY;
 
-  uint8_t payload[PAYLOAD_SIZE];
-  if (!Transfer(NRF_R_RX_PAYLOAD, NULL, payload, sizeof(payload))
+  if (!Transfer(NRF_R_RX_PL_WID, NULL, &size, 1U))
+    return NRF_RX_ERROR;
+  if (size != WIRELESS_PACKET_SIZE)
+  {
+    (void)Transfer(NRF_FLUSH_RX, NULL, NULL, 0U);
+    (void)WriteRegister(NRF_STATUS, STATUS_RX_DR);
+    return NRF_RX_ERROR;
+  }
+  if (!Transfer(NRF_R_RX_PAYLOAD, NULL, payload, WIRELESS_PACKET_SIZE)
       || !WriteRegister(NRF_STATUS, STATUS_RX_DR))
     return NRF_RX_ERROR;
-
-  *dx = DecodeAxis(payload);
-  *dy = DecodeAxis(&payload[2]);
   return NRF_RX_PACKET;
+}
+
+NrfMotionRxResult NrfMotion_Read(uint8_t payload[WIRELESS_PACKET_SIZE])
+{
+  return rx_ready ? ReadPayload(payload) : NRF_RX_ERROR;
+}
+
+NrfMotionRxResult NrfMotion_ReadAck(uint8_t payload[WIRELESS_PACKET_SIZE])
+{
+  return tx_state == NRF_TX_ACKED ? ReadPayload(payload) : NRF_RX_EMPTY;
+}
+
+bool NrfMotion_QueueAck(const uint8_t payload[WIRELESS_PACKET_SIZE])
+{
+  uint8_t fifo;
+  return rx_ready && Transfer(NRF_R_REGISTER | NRF_FIFO_STATUS, NULL, &fifo, 1U)
+         && (fifo & FIFO_TX_FULL) == 0U
+         && Transfer(NRF_W_ACK_PAYLOAD_P0, payload, NULL, WIRELESS_PACKET_SIZE);
 }

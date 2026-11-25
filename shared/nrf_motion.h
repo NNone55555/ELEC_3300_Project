@@ -2,6 +2,7 @@
 #define NRF_MOTION_H
 
 #include "stm32f1xx_hal.h"
+#include "wireless_packet.h"
 #include <stdbool.h>
 
 typedef enum {
@@ -28,11 +29,14 @@ typedef enum {
 bool NrfMotion_Init(SPI_HandleTypeDef *spi, NrfMotionRole role);
 
 /* TX uses one payload at a time. Poll from the SPI owner until it completes. */
-bool NrfMotion_StartTx(int16_t dx, int16_t dy);
+bool NrfMotion_StartTx(const uint8_t payload[WIRELESS_PACKET_SIZE]);
 void NrfMotion_PollTx(void);
 NrfMotionTxState NrfMotion_GetTxState(void);
+NrfMotionRxResult NrfMotion_ReadAck(uint8_t payload[WIRELESS_PACKET_SIZE]);
 
 /* RX reads one packet if the radio's FIFO contains data. */
-NrfMotionRxResult NrfMotion_Read(int16_t *dx, int16_t *dy);
+NrfMotionRxResult NrfMotion_Read(uint8_t payload[WIRELESS_PACKET_SIZE]);
+/* Queued data is sent in the hardware ACK for a subsequent uplink. */
+bool NrfMotion_QueueAck(const uint8_t payload[WIRELESS_PACKET_SIZE]);
 
 #endif

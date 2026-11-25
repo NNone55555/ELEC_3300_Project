@@ -1,6 +1,5 @@
 #include "login_typing.h"
 #include "usb_hid_controller.h"
-#include "usbd_hid.h"
 #include "stm32f1xx_hal.h"
 #include "user_profile.h"
 #include <stddef.h>
@@ -27,13 +26,13 @@ static bool EncodeCharacter(char character, uint8_t *usage, uint8_t *modifiers)
   if (character >= 'a' && character <= 'z')
   {
     *usage = 0x04U + (uint8_t)(character - 'a');
-    if ((USBD_HID_GetKeyboardLeds() & CAPS_LOCK_LED) != 0U)
+    if ((UsbHid_GetInputKeyboardLeds() & CAPS_LOCK_LED) != 0U)
       *modifiers = LEFT_SHIFT_MODIFIER;
   }
   else if (character >= 'A' && character <= 'Z')
   {
     *usage = 0x04U + (uint8_t)(character - 'A');
-    if ((USBD_HID_GetKeyboardLeds() & CAPS_LOCK_LED) == 0U)
+    if ((UsbHid_GetInputKeyboardLeds() & CAPS_LOCK_LED) == 0U)
       *modifiers = LEFT_SHIFT_MODIFIER;
   }
   else if (character >= '1' && character <= '9')
@@ -90,7 +89,7 @@ bool Login_RequestPassword(const char *text)
     if (valid)
     {
       character_index = 0U;
-      session = USBD_HID_GetSession();
+      session = UsbHid_GetInputSession();
       started = HAL_GetTick();
       next_report = started;
       state = LOGIN_CLEAR_KEYS; /* Profile manager gates one event per transition. */
@@ -134,7 +133,7 @@ bool Login_Service(void)
     __set_PRIMASK(interrupt_state);
     return true;
   }
-  if (IsTyping(state) && (session != USBD_HID_GetSession()
+  if (IsTyping(state) && (session != UsbHid_GetInputSession()
                          || (uint32_t)(now - started) >= LOGIN_TIMEOUT_MS))
     state = LOGIN_ABORT_RELEASE;
 

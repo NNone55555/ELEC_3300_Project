@@ -16,6 +16,7 @@ void ProfileManager_OnFingerprintMatch(uint16_t id); /* Fingerprint task, nonblo
 void ProfileManager_SetConfigurationMode(bool enabled);
 bool ProfileManager_IsConfigurationMode(void);
 bool ProfileManager_GetActive(UserProfile *profile);
+uint16_t ProfileManager_GetActiveId(void);
 bool ProfileManager_CanRegister(void);
 void ProfileManager_BeginPreview(const UserProfile *profile);
 void ProfileManager_Preview(const UserProfile *profile);

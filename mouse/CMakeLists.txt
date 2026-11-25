@@ -64,7 +64,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/fingerprint_service.c
     Core/Src/profile_manager.c
     Core/Src/config_menu.c
+    Core/Src/wireless_tx.c
     ../shared/nrf_motion.c
+    ../shared/wireless_packet.c
 )
 
 # Passwords are configured through UART and stored in prototype EEPROM records.

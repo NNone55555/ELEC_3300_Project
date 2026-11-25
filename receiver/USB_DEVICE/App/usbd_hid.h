@@ -34,6 +34,7 @@ extern USBD_ClassTypeDef USBD_HID;
 uint8_t USBD_HID_SendReport(USBD_HandleTypeDef *device, const uint8_t *report,
                             uint16_t size);
 uint32_t USBD_HID_GetSession(void);
+void USBD_HID_OnSuspend(void);
 uint8_t USBD_HID_GetKeyboardLeds(void);
 
 #endif

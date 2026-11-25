@@ -7,6 +7,7 @@
 #include "user_profile.h"
 #include "usb_device.h"
 #include "usbd_hid.h"
+#include "wireless_tx.h"
 #include <limits.h>
 #include <string.h>
 
@@ -61,24 +62,49 @@ static uint8_t MouseButtons(uint8_t physical)
   return mapped;
 }
 
+static bool SendMouse(uint8_t buttons, int16_t x, int16_t y, int8_t wheel)
+{
+  if (!UsbHid_IsWired())
+    return WirelessTx_SendMouse(buttons, x, y, wheel);
+
+  const MouseReport report = {HID_MOUSE_REPORT_ID, buttons & 0x1FU, (int8_t)x, (int8_t)y, wheel};
+  return USBD_HID_SendReport(&hUsbDeviceFS, (const uint8_t *)&report, sizeof(report)) == USBD_OK;
+}
+
 bool Send_Mouse_Action(uint8_t buttons, int8_t x, int8_t y, int8_t wheel)
 {
-  const MouseReport report = {HID_MOUSE_REPORT_ID, buttons & 0x1FU, x, y, wheel};
-  return USBD_HID_SendReport(&hUsbDeviceFS, (const uint8_t *)&report, sizeof(report)) == USBD_OK;
+  return SendMouse(buttons, x, y, wheel);
 }
 
 bool Send_Keyboard_Action(uint8_t modifiers, const uint8_t keys[6])
 {
   if (keys == NULL)
     return false;
+  if (!UsbHid_IsWired())
+    return WirelessTx_SendKeyboard(modifiers, keys);
   KeyboardReport report = {HID_KEYBOARD_REPORT_ID, modifiers, 0, {0}};
   memcpy(report.keys, keys, sizeof(report.keys));
   return USBD_HID_SendReport(&hUsbDeviceFS, (const uint8_t *)&report, sizeof(report)) == USBD_OK;
 }
 
-bool UsbHid_IsConfigured(void)
+bool UsbHid_IsWired(void)
 {
   return hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED && hUsbDeviceFS.pClassData != NULL;
+}
+
+bool UsbHid_IsConfigured(void)
+{
+  return UsbHid_IsWired() || WirelessTx_IsReady();
+}
+
+uint32_t UsbHid_GetInputSession(void)
+{
+  return UsbHid_IsWired() ? USBD_HID_GetSession() << 1 : (WirelessTx_GetSession() << 1) | 1U;
+}
+
+uint8_t UsbHid_GetInputKeyboardLeds(void)
+{
+  return UsbHid_IsWired() ? USBD_HID_GetKeyboardLeds() : WirelessTx_GetKeyboardLeds();
 }
 
 static int32_t AddSaturated(int32_t current, int32_t delta)
@@ -92,7 +118,7 @@ void UsbHid_AddMotion(int16_t x, int16_t y, int32_t wheel)
   uint32_t interrupt_state = __get_PRIMASK();
   __disable_irq();
   /* Never replay motion accumulated while disconnected, suspended or reset. */
-  if (connected && UsbHid_IsConfigured() && active_session == USBD_HID_GetSession())
+  if (connected && UsbHid_IsConfigured() && active_session == UsbHid_GetInputSession())
   {
     pending_x = AddSaturated(pending_x, x);
     pending_y = AddSaturated(pending_y, y);
@@ -104,6 +130,11 @@ void UsbHid_AddMotion(int16_t x, int16_t y, int32_t wheel)
 static int8_t ReportDelta(int32_t value)
 {
   return value > 127 ? 127 : value < -127 ? -127 : (int8_t)value;
+}
+
+static int16_t RadioDelta(int32_t value)
+{
+  return value > INT16_MAX ? INT16_MAX : value < INT16_MIN ? INT16_MIN : (int16_t)value;
 }
 
 static void QueueButtons(uint8_t buttons)
@@ -127,14 +158,20 @@ void UsbHid_ServiceMouse(uint8_t buttons)
   uint8_t held_sides = buttons & SIDE_BITS;
   uint32_t irq = __get_PRIMASK(); __disable_irq();
   bool configured = UsbHid_IsConfigured();
-  uint32_t session = USBD_HID_GetSession();
+  uint32_t session = UsbHid_GetInputSession();
   if (!configured || !connected || active_session != session || applied_macro_revision != macro_revision)
   {
     bool remapping = applied_macro_revision != macro_revision;
     bool new_session = !configured || !connected || active_session != session;
     connected = configured; active_session = session; applied_macro_revision = macro_revision;
     if (new_session)
+    {
       pending_x = pending_y = pending_wheel = 0;
+      /* A shortcut held across a disconnect must be released before rearming. */
+      for (unsigned side = 0; side < 2U; ++side)
+        if (side_macros[side] >= MACRO_COPY && side_macros[side] <= MACRO_SELECT_ALL)
+          inhibited_sides |= held_sides & (MOUSE_BUTTON_SIDE1 << side);
+    }
     queue_head = queue_count = 0U; reported_buttons = 0U;
     processed_sides = 0U; macro_release_pending = false; keyboard_sync_pending = true;
     if (remapping) inhibited_sides |= buttons & SIDE_BITS;
@@ -187,8 +224,11 @@ void UsbHid_ServiceMouse(uint8_t buttons)
       }
     }
   }
-  int8_t x = ReportDelta(pending_x), y = ReportDelta(pending_y), wheel = ReportDelta(pending_wheel);
-  if ((queue_count || x || y || wheel) && Send_Mouse_Action(MouseButtons(physical), x, y, wheel))
+  bool wired = UsbHid_IsWired();
+  int16_t x = wired ? ReportDelta(pending_x) : RadioDelta(pending_x);
+  int16_t y = wired ? ReportDelta(pending_y) : RadioDelta(pending_y);
+  int8_t wheel = ReportDelta(pending_wheel);
+  if ((queue_count || x || y || wheel) && SendMouse(MouseButtons(physical), x, y, wheel))
   {
     pending_x -= x; pending_y -= y; pending_wheel -= wheel; reported_buttons = physical;
     if (queue_count) {queue_head = (queue_head + 1U) % BUTTON_QUEUE_SIZE; --queue_count; processed_sides = 0;}
