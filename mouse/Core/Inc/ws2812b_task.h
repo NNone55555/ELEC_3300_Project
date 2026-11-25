@@ -4,9 +4,7 @@
 #include "stm32f1xx_hal.h"
 #include <stdbool.h>
 
-/* After osKernelInitialize, before osKernelStart. Owns periodic driver Update.
- * The optional demonstration is independent of fingerprint/profile/serial code.
- */
+/* After osKernelInitialize, before osKernelStart. Services the strip and ADC. */
 bool WS2812B_TaskStart(TIM_HandleTypeDef *timer);
 
 #endif

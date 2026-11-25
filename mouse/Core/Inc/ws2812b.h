@@ -4,12 +4,12 @@
 #include "stm32f1xx_hal.h"
 #include <stdbool.h>
 
-/* Actual strip length is not recorded in the project. Change this constant,
- * or define it in the build, to match the connected strip (1..256 LEDs).
- */
+/* Total series length (4..256). By default: 8 profile LEDs + 3 battery LEDs. */
 #ifndef WS2812B_LED_COUNT
-#define WS2812B_LED_COUNT 8U
+#define WS2812B_LED_COUNT 11U
 #endif
+#define WS2812B_BATTERY_LED_COUNT 3U
+#define WS2812B_PROFILE_LED_COUNT (WS2812B_LED_COUNT - WS2812B_BATTERY_LED_COUNT)
 
 /* 72 MHz / 90 = 800 kHz. Defaults meet the WS2812B V5 high/low windows.
  * See WS2812B.md before changing these for a different strip revision.
@@ -74,10 +74,10 @@ void WS2812B_Update(void);
 HAL_StatusTypeDef WS2812B_SetConfig(const WS2812B_Config *config);
 WS2812B_Config WS2812B_GetConfig(void);
 HAL_StatusTypeDef WS2812B_SetMode(WS2812B_Mode mode);
-void WS2812B_SetColor(uint8_t red, uint8_t green, uint8_t blue);
-HAL_StatusTypeDef WS2812B_SetBrightness(uint8_t percent);
-HAL_StatusTypeDef WS2812B_SetPeriodMs(uint32_t period_ms);
-bool WS2812B_IsBusy(void);
+/* Last three LEDs, 10% brightness, independent of the profile configuration.
+ * Zero bars clears the indicator; low battery uses red instead of green.
+ */
+void WS2812B_SetBatteryIndicator(uint8_t bars, bool low);
 WS2812B_Status WS2812B_GetStatus(void);
 
 /* Route the matching HAL callbacks here; these functions make no RTOS calls. */

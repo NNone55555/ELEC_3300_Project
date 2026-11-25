@@ -1,4 +1,12 @@
 # Checked-in ST USB core + application HID class. No Cube installation required.
+if(TARGET USB_Device_Library)
+    get_target_property(usb_sources USB_Device_Library SOURCES)
+    list(FILTER usb_sources EXCLUDE REGEX "/Class/HID/Src/usbd_hid[.]c$")
+    set_property(TARGET USB_Device_Library PROPERTY SOURCES "${usb_sources}")
+    target_sources(USB_Device_Library PRIVATE USB_DEVICE/App/usbd_hid.c)
+    return()
+endif()
+
 target_include_directories(stm32cubemx INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/USB_DEVICE/App
     ${CMAKE_CURRENT_SOURCE_DIR}/USB_DEVICE/Target

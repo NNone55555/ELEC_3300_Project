@@ -56,6 +56,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/login_typing.c
     Core/Src/ws2812b.c
     Core/Src/ws2812b_task.c
+    Core/Src/battery_monitor.c
     Core/Src/user_profile.c
     Core/Src/at24c02.c
     Core/Src/profile_storage.c
@@ -65,15 +66,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/config_menu.c
 )
 
-option(MOUSE_WS2812B_DEMO "Run the independent WS2812B color/animation demonstration" OFF)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    MOUSE_WS2812B_DEMO=$<BOOL:${MOUSE_WS2812B_DEMO}>
-)
-
 # Passwords are configured through UART and stored in prototype EEPROM records.
 # The old private/login_credentials.h is preserved locally but is not compiled.
 
-# Native STM32F103 USB, kept separate from CubeMX's generated CMake list.
+# Keep the mouse and keyboard HID class when CubeMX generates USB sources.
 include(cmake/usb_device.cmake)
 
 # Add include paths

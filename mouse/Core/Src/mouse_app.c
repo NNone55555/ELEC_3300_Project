@@ -9,6 +9,7 @@
 #include "config_menu.h"
 #include "profile_manager.h"
 #include "fingerprint_service.h"
+#include "battery_monitor.h"
 #include "lcd.h"
 #include "main.h"
 #include "cmsis_os2.h"
@@ -358,7 +359,12 @@ static void RenderStatus(const MouseStatus *status)
   RenderLine(15, text);
   RenderLine(16, UsbHid_IsConfigured() ? "USB: mouse + keyboard ready" : "USB: waiting / suspended");
   RenderLine(17, Login_GetStatusText());
-  snprintf(text, sizeof(text), "Heap free: %lu bytes", (unsigned long)xPortGetFreeHeapSize());
+  int32_t raw_adc = BatteryMonitor_GetRaw();
+  unsigned long heap_free = (unsigned long)xPortGetFreeHeapSize();
+  if (raw_adc >= 0)
+    snprintf(text, sizeof(text), "PC2 raw:%4ld Heap:%luB", (long)raw_adc, heap_free);
+  else
+    snprintf(text, sizeof(text), "PC2 raw:---- Heap:%luB", heap_free);
   RenderLine(18, text);
   UserProfile active;
   if (ProfileManager_GetActive(&active)) snprintf(text, sizeof(text), "Active: %s ID=%u", active.name, active.fingerprint_id);

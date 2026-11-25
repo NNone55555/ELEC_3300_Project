@@ -61,6 +61,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define BTN_MIDDLE_Pin GPIO_PIN_5
 #define BTN_MIDDLE_GPIO_Port GPIOE
+#define FP_TOUCH_Pin GPIO_PIN_6
+#define FP_TOUCH_GPIO_Port GPIOE
 #define FLASH_CS_Pin GPIO_PIN_0
 #define FLASH_CS_GPIO_Port GPIOC
 #define PMW_RESET_Pin GPIO_PIN_4
@@ -91,14 +93,12 @@ void Error_Handler(void);
 #define BTN_SIDE1_GPIO_Port GPIOC
 #define BTN_SIDE2_Pin GPIO_PIN_2
 #define BTN_SIDE2_GPIO_Port GPIOD
+#define USB_ENABLE_Pin GPIO_PIN_6
+#define USB_ENABLE_GPIO_Port GPIOD
 #define LCD_RST_Pin GPIO_PIN_1
 #define LCD_RST_GPIO_Port GPIOE
 
 /* USER CODE BEGIN Private defines */
-#define FP_TOUCH_Pin GPIO_PIN_6
-#define FP_TOUCH_GPIO_Port GPIOE
-#define USB_ENABLE_Pin GPIO_PIN_6
-#define USB_ENABLE_GPIO_Port GPIOD
 
 /* USER CODE END Private defines */
 

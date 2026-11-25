@@ -1,5 +1,5 @@
 #include "ws2812b.h"
-#include <string.h>
+#include <stddef.h>
 
 #define TIMER_CLOCK_HZ 72000000U
 #define PERIOD_TICKS 90U
@@ -11,8 +11,10 @@
 #define DATA_SLOTS (WS2812B_LED_COUNT * 24U)
 #define BUFFER_SLOTS (LEADING_SLOTS + DATA_SLOTS + RESET_SLOTS + PIPELINE_PADDING)
 #define DMA_TIMEOUT_MS (((BUFFER_SLOTS * 1250U + 999999U) / 1000000U) + 10U)
+#define BATTERY_LED_VALUE ((255U * 10U + 50U) / 100U)
 
-_Static_assert(WS2812B_LED_COUNT >= 1U && WS2812B_LED_COUNT <= 256U, "LED count must be 1..256");
+_Static_assert(WS2812B_LED_COUNT > WS2812B_BATTERY_LED_COUNT && WS2812B_LED_COUNT <= 256U,
+               "LED count must be 4..256, including three reserved battery LEDs");
 _Static_assert(BUFFER_SLOTS <= UINT16_MAX, "DMA length exceeds HAL limit");
 _Static_assert(WS2812B_ZERO_TICKS > 0U && WS2812B_ZERO_TICKS < WS2812B_ONE_TICKS
                && WS2812B_ONE_TICKS < PERIOD_TICKS, "Invalid PWM duties");
@@ -21,6 +23,8 @@ _Static_assert(WS2812B_ZERO_TICKS > 0U && WS2812B_ZERO_TICKS < WS2812B_ONE_TICKS
 _Alignas(4) static uint16_t pwm_buffer[BUFFER_SLOTS];
 static TIM_HandleTypeDef *strip_timer;
 static WS2812B_Config desired = {WS2812B_OFF, 255, 255, 255, 100, 3000};
+static uint8_t battery_bars;
+static bool battery_low;
 static uint32_t revision = 1U;
 static uint32_t submitted_revision;
 static volatile WS2812B_State state;
@@ -159,39 +163,17 @@ HAL_StatusTypeDef WS2812B_SetMode(WS2812B_Mode mode)
   return HAL_OK;
 }
 
-void WS2812B_SetColor(uint8_t red, uint8_t green, uint8_t blue)
+void WS2812B_SetBatteryIndicator(uint8_t bars, bool low)
 {
   uint32_t interrupt_state = __get_PRIMASK();
   __disable_irq();
-  desired.red = red;
-  desired.green = green;
-  desired.blue = blue;
-  ++revision;
+  if (battery_bars != bars || battery_low != low)
+  {
+    battery_bars = bars;
+    battery_low = low;
+    ++revision;
+  }
   __set_PRIMASK(interrupt_state);
-}
-
-HAL_StatusTypeDef WS2812B_SetBrightness(uint8_t percent)
-{
-  if (percent > 100U)
-    return HAL_ERROR;
-  uint32_t interrupt_state = __get_PRIMASK();
-  __disable_irq();
-  desired.brightness = percent;
-  ++revision;
-  __set_PRIMASK(interrupt_state);
-  return HAL_OK;
-}
-
-HAL_StatusTypeDef WS2812B_SetPeriodMs(uint32_t period_ms)
-{
-  if (period_ms < 100U || period_ms > 60000U)
-    return HAL_ERROR;
-  uint32_t interrupt_state = __get_PRIMASK();
-  __disable_irq();
-  desired.period_ms = period_ms;
-  ++revision;
-  __set_PRIMASK(interrupt_state);
-  return HAL_OK;
 }
 
 static uint32_t BreathingEnvelope(void)
@@ -205,7 +187,7 @@ static uint32_t BreathingEnvelope(void)
 static void RainbowColor(uint16_t index, uint8_t rgb[3])
 {
   uint16_t hue = (((uint32_t)phase * 1536U) >> 16)
-                 + ((uint32_t)index * 1536U) / WS2812B_LED_COUNT;
+                 + ((uint32_t)index * 1536U) / WS2812B_PROFILE_LED_COUNT;
   hue %= 1536U;
   uint8_t ramp = hue & 0xFFU;
   switch (hue >> 8)
@@ -219,19 +201,31 @@ static void RainbowColor(uint16_t index, uint8_t rgb[3])
   }
 }
 
-static void EncodeFrame(const WS2812B_Config *config)
+static void EncodeFrame(const WS2812B_Config *config, uint8_t bars, bool low)
 {
   uint32_t envelope = config->mode == WS2812B_BREATHING ? BreathingEnvelope() : 65535U;
   uint32_t offset = LEADING_SLOTS;
   for (uint16_t led = 0; led < WS2812B_LED_COUNT; ++led)
   {
-    uint8_t rgb[3] = {config->red, config->green, config->blue};
-    if (config->mode == WS2812B_OFF)
-      memset(rgb, 0, sizeof(rgb));
-    else if (config->mode == WS2812B_RAINBOW)
-      RainbowColor(led, rgb);
-    for (uint8_t component = 0; component < 3U; ++component)
-      rgb[component] = ((uint64_t)rgb[component] * config->brightness * envelope + 3276750U) / 6553500U;
+    uint8_t rgb[3] = {0};
+    if (led < WS2812B_PROFILE_LED_COUNT && config->mode != WS2812B_OFF)
+    {
+      if (config->mode == WS2812B_RAINBOW)
+        RainbowColor(led, rgb);
+      else
+      {
+        rgb[0] = config->red;
+        rgb[1] = config->green;
+        rgb[2] = config->blue;
+      }
+      for (uint8_t component = 0; component < 3U; ++component)
+        rgb[component] = ((uint64_t)rgb[component] * config->brightness * envelope + 3276750U) / 6553500U;
+    }
+    else if (led >= WS2812B_PROFILE_LED_COUNT && led - WS2812B_PROFILE_LED_COUNT < bars)
+    {
+      rgb[0] = low ? BATTERY_LED_VALUE : 0U;
+      rgb[1] = low ? 0U : BATTERY_LED_VALUE;
+    }
     const uint8_t grb[3] = {rgb[1], rgb[0], rgb[2]};
     for (uint8_t component = 0; component < 3U; ++component)
       for (uint8_t bit = 0x80U; bit != 0U; bit >>= 1)
@@ -248,6 +242,8 @@ void WS2812B_Update(void)
   __disable_irq();
   uint32_t now = HAL_GetTick();
   WS2812B_Config config = desired;
+  uint8_t bars = battery_bars;
+  bool low = battery_low;
   uint32_t current_revision = revision;
   if (state == WS2812B_TRANSMITTING && (uint32_t)(now - transfer_started) >= DMA_TIMEOUT_MS)
     StopAndReset(WS2812B_ERROR_TIMEOUT);
@@ -279,7 +275,7 @@ void WS2812B_Update(void)
 
   /* A single task owns Update/Init; setters only touch desired settings. */
   state = WS2812B_PREPARING;
-  EncodeFrame(&config); /* IRQs remain enabled throughout the serialization. */
+  EncodeFrame(&config, bars, low); /* IRQs remain enabled during serialization. */
   interrupt_state = __get_PRIMASK();
   __disable_irq();
   now = HAL_GetTick();
@@ -349,10 +345,4 @@ WS2812B_Status WS2812B_GetStatus(void)
   WS2812B_Status status = {state, last_error, frames_completed, errors};
   __set_PRIMASK(interrupt_state);
   return status;
-}
-
-bool WS2812B_IsBusy(void)
-{
-  WS2812B_State current = state;
-  return current == WS2812B_PREPARING || current == WS2812B_TRANSMITTING || current == WS2812B_RESETTING;
 }
