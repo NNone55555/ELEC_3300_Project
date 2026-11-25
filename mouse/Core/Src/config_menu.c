@@ -1124,9 +1124,13 @@ static void PollBackend(void)
     if (ProfileManager_Operation() == PROFILE_OP_OK)
     {
       ProfileManager_EndPreview(&temporary);
+      bool applied = ProfileManager_GetActiveId() == temporary.fingerprint_id;
       registering = new_template = false;
       UserProfile_ClearSecret(&temporary, sizeof(temporary));
-      Notice(save_is_new ? "New user saved and verified!" : "Changes saved and verified!");
+      if (!applied)
+        Notice("Profile saved. Exit configuration and scan this user's fingerprint to apply it.");
+      else
+        Notice(save_is_new ? "New user saved and verified!" : "Changes saved and verified!");
       Show(MENU_ROOT);
     }
     else if (save_is_new)

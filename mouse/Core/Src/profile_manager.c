@@ -20,7 +20,7 @@ typedef struct
   uint8_t side1, side2;
 } RuntimeSnapshot;
 static RuntimeSnapshot rollback;
-static bool previewing, active_valid, configuration;
+static bool previewing, active_valid, active_matched, configuration;
 static UserProfile active, operation_profile;
 static volatile bool match_pending;
 static volatile uint16_t matched_id;
@@ -50,15 +50,34 @@ static RuntimeSnapshot Capture(void)
   UsbHid_GetSideMacros(&snapshot.side1, &snapshot.side2);
   return snapshot;
 }
+static void ApplyIdleMacros(void)
+{
+  uint8_t side1 = MACRO_BACK;
+  uint8_t side2 = MACRO_FORWARD;
+  /* With one saved profile there is no ambiguity about the button mapping.
+   * Applying it at boot is independent of user authentication and login. */
+  if (ProfileStorage_Status() == STORAGE_OK && ProfileStorage_Count() == 1U)
+  {
+    UserProfile saved;
+    if (ProfileStorage_Get(0, &saved))
+    {
+      side1 = saved.side1_macro;
+      side2 = saved.side2_macro;
+    }
+    UserProfile_ClearSecret(&saved, sizeof(saved));
+  }
+  UsbHid_SetSideMacros(side1, side2);
+}
 static void Fallback(void)
 {
   (void)MouseApp_SetDpi(800);
   (void)WS2812B_SetMode(WS2812B_OFF);
-  UsbHid_SetSideMacros(MACRO_BACK, MACRO_FORWARD);
+  ApplyIdleMacros();
 }
 void ProfileManager_Init(I2C_HandleTypeDef *i2c)
 {
   active_valid = previewing = configuration = credential_pending = match_pending = false;
+  active_matched = false;
   UserProfile_ClearSecret(&active, sizeof(active));
   UserProfile_ClearSecret(&operation_profile, sizeof(operation_profile));
   work = WORK_NONE;
@@ -130,9 +149,14 @@ void ProfileManager_EndPreview(const UserProfile *saved)
 {
   if (!previewing)
     return;
-  if (saved != NULL && active_valid && active.fingerprint_id == saved->fingerprint_id)
+  if (saved != NULL && (!active_valid || active.fingerprint_id == saved->fingerprint_id))
   {
+    /* Registration and editing verify the owner. Let the first saved profile
+     * take effect immediately, but leave login to a normal fingerprint scan. */
+    if (!active_valid)
+      active_matched = false;
     active = *saved;
+    active_valid = true;
     Apply(saved);
   }
   else
@@ -186,6 +210,9 @@ bool ProfileManager_Delete(const UserProfile *p)
     active_valid = credential_pending = false;
     UserProfile_ClearSecret(&active, sizeof(active));
     Login_Cancel();
+  }
+  if (!active_valid)
+  {
     Fallback();
     if (previewing)
       rollback = Capture();
@@ -230,6 +257,8 @@ StorageResult ProfileManager_RetryStorage(void)
     }
     UserProfile_ClearSecret(&refreshed, sizeof(refreshed));
   }
+  else if (!previewing)
+    ApplyIdleMacros();
   return result;
 }
 
@@ -328,11 +357,13 @@ void ProfileManager_Update(void)
   if (!configuration && have_match)
   {
     UserProfile found;
-    if (ProfileStorage_Find(id, &found) && (!active_valid || active.fingerprint_id != id))
+    if (ProfileStorage_Find(id, &found) &&
+        (!active_valid || active.fingerprint_id != id || !active_matched))
     {
       Login_Cancel();
       active = found;
       active_valid = true;
+      active_matched = true;
       Apply(&active);
       credential_pending = active.password[0] != '\0';
       credential_started = now;

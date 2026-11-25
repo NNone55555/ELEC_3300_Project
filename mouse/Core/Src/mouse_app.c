@@ -354,9 +354,13 @@ static void RenderStatus(const MouseStatus *status)
              (unsigned)((buttons & MOUSE_BUTTON_RIGHT) != 0U),
              (unsigned)((buttons & MOUSE_BUTTON_MIDDLE) != 0U));
   RenderLine(13, text);
-  snprintf(text, sizeof(text), "Side1=%u Side2=%u",
+  uint8_t side1, side2;
+  UsbHid_GetSideMacros(&side1, &side2);
+  snprintf(text, sizeof(text), "S1=%u %s S2=%u %s",
              (unsigned)((buttons & MOUSE_BUTTON_SIDE1) != 0U),
-             (unsigned)((buttons & MOUSE_BUTTON_SIDE2) != 0U));
+             UserProfile_MacroName(side1),
+             (unsigned)((buttons & MOUSE_BUTTON_SIDE2) != 0U),
+             UserProfile_MacroName(side2));
   RenderLine(14, text);
   snprintf(text, sizeof(text), "Raw pins=%02X USB overflow=%lu",
              (unsigned)status->buttons.pin_levels,

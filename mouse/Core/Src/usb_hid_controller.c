@@ -174,7 +174,8 @@ void UsbHid_ServiceMouse(uint8_t buttons)
     }
     queue_head = queue_count = 0U; reported_buttons = 0U;
     processed_sides = 0U; macro_release_pending = false; keyboard_sync_pending = true;
-    if (remapping) inhibited_sides |= buttons & SIDE_BITS;
+    /* Suppress an existing hold, but keep a new edge sampled as the map changes. */
+    if (remapping) inhibited_sides |= held_sides & observed_buttons;
     buttons &= (uint8_t)~inhibited_sides;
     observed_buttons = buttons;
     if (configured) QueueButtons(buttons);
