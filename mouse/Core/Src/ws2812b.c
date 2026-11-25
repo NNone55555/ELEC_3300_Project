@@ -12,6 +12,9 @@
 #define BUFFER_SLOTS (LEADING_SLOTS + DATA_SLOTS + RESET_SLOTS + PIPELINE_PADDING)
 #define DMA_TIMEOUT_MS (((BUFFER_SLOTS * 1250U + 999999U) / 1000000U) + 10U)
 #define BATTERY_LED_VALUE ((255U * 10U + 50U) / 100U)
+#define PROFILE_LED_STRIDE 3U
+#define BRIGHTNESS_LIMIT_PERCENT 50U
+#define CHANNEL_VALUE_LIMIT (255U * BRIGHTNESS_LIMIT_PERCENT / 100U)
 
 _Static_assert(WS2812B_LED_COUNT > WS2812B_BATTERY_LED_COUNT && WS2812B_LED_COUNT <= 256U,
                "LED count must be 4..256, including three reserved battery LEDs");
@@ -204,11 +207,14 @@ static void RainbowColor(uint16_t index, uint8_t rgb[3])
 static void EncodeFrame(const WS2812B_Config *config, uint8_t bars, bool low)
 {
   uint32_t envelope = config->mode == WS2812B_BREATHING ? BreathingEnvelope() : 65535U;
+  uint32_t brightness = config->brightness > BRIGHTNESS_LIMIT_PERCENT
+                        ? BRIGHTNESS_LIMIT_PERCENT : config->brightness;
   uint32_t offset = LEADING_SLOTS;
   for (uint16_t led = 0; led < WS2812B_LED_COUNT; ++led)
   {
     uint8_t rgb[3] = {0};
-    if (led < WS2812B_PROFILE_LED_COUNT && config->mode != WS2812B_OFF)
+    if (led < WS2812B_PROFILE_LED_COUNT && led % PROFILE_LED_STRIDE == 0U
+        && config->mode != WS2812B_OFF)
     {
       if (config->mode == WS2812B_RAINBOW)
         RainbowColor(led, rgb);
@@ -219,7 +225,11 @@ static void EncodeFrame(const WS2812B_Config *config, uint8_t bars, bool low)
         rgb[2] = config->blue;
       }
       for (uint8_t component = 0; component < 3U; ++component)
-        rgb[component] = ((uint64_t)rgb[component] * config->brightness * envelope + 3276750U) / 6553500U;
+      {
+        uint32_t value = ((uint64_t)rgb[component] * brightness * envelope + 3276750U) / 6553500U;
+        /* Rounding full scale at 50% would otherwise yield 128/255. */
+        rgb[component] = value > CHANNEL_VALUE_LIMIT ? CHANNEL_VALUE_LIMIT : value;
+      }
     }
     else if (led >= WS2812B_PROFILE_LED_COUNT && led - WS2812B_PROFILE_LED_COUNT < bars)
     {

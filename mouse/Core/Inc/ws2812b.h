@@ -4,9 +4,9 @@
 #include "stm32f1xx_hal.h"
 #include <stdbool.h>
 
-/* Total series length (4..256). By default: 8 profile LEDs + 3 battery LEDs. */
+/* Total series length (4..256). By default: 20 profile LEDs + 3 battery LEDs. */
 #ifndef WS2812B_LED_COUNT
-#define WS2812B_LED_COUNT 11U
+#define WS2812B_LED_COUNT 23U
 #endif
 #define WS2812B_BATTERY_LED_COUNT 3U
 #define WS2812B_PROFILE_LED_COUNT (WS2812B_LED_COUNT - WS2812B_BATTERY_LED_COUNT)
@@ -33,7 +33,7 @@ typedef struct {
   uint8_t red;
   uint8_t green;
   uint8_t blue;
-  uint8_t brightness; /* 0..100 percent, applied in every mode. */
+  uint8_t brightness; /* Requested 0..100 percent. Output is capped at 50%. */
   uint32_t period_ms; /* One animation cycle, 100..60000 ms; lower = faster. */
 } WS2812B_Config;
 
@@ -69,7 +69,7 @@ void WS2812B_Update(void);
 
 /* Task-safe settings, including one atomic profile-sized configuration copy.
  * Changes are applied asynchronously; a DMA buffer in use is never modified.
- * SetColor changes the base color for STATIC/BREATHING; select the mode too.
+ * Profile lighting uses one LED every three, starting at the first LED.
  */
 HAL_StatusTypeDef WS2812B_SetConfig(const WS2812B_Config *config);
 WS2812B_Config WS2812B_GetConfig(void);
