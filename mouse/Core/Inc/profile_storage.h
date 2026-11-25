@@ -3,16 +3,13 @@
 #include "user_profile.h"
 #include "at24c02.h"
 
-/* Three 72-byte records (two users + COW spare). Preserve 224..255, including
- * the counter at 248..255. The old four 56-byte records remain readable and
- * migrate on explicit Save; no boot-time formatting or automatic data erase.
+/* Three encrypted 72-byte records (two users and one copy-on-write spare).
+ * Bytes 216..223 journal the one-time plaintext migration. Preserve 224..255.
  */
 #define PROFILE_RECORD_BYTES 72U
 #define PROFILE_STORAGE_BYTES 224U
 #define PROFILE_STORAGE_SLOTS (PROFILE_STORAGE_BYTES / PROFILE_RECORD_BYTES)
 #define PROFILE_MAX_USERS (PROFILE_STORAGE_SLOTS - 1U)
-#define PROFILE_LEGACY_RECORD_BYTES 56U
-#define PROFILE_LEGACY_SLOTS (PROFILE_STORAGE_BYTES / PROFILE_LEGACY_RECORD_BYTES)
 
 typedef enum
 {
@@ -27,7 +24,9 @@ typedef enum
   STORAGE_PROTECTED,
   STORAGE_FULL,
   STORAGE_INVALID,
-  STORAGE_NOT_FOUND
+  STORAGE_NOT_FOUND,
+  STORAGE_AUTH_ERROR,
+  STORAGE_NONCE_ERROR
 } StorageResult;
 
 StorageResult ProfileStorage_Init(I2C_HandleTypeDef *i2c);

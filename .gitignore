@@ -25,6 +25,7 @@ mx.scratch
 
 # Local login credential; never commit the real password.
 /mouse/private/
+/shared/private/
 
 # Operating system files
 .DS_Store

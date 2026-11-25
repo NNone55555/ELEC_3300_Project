@@ -49,7 +49,6 @@ void UserProfile_Default(UserProfile *profile, const char *name, uint16_t id)
   memset(profile, 0, sizeof(*profile));
   profile->fingerprint_id = id;
   profile->dpi = 1600;
-  strncpy(profile->name, name, PROFILE_NAME_MAX);
   strncpy(profile->computer_username, name, PROFILE_USERNAME_MAX);
   profile->rgb_mode = 1;
   profile->blue = 255;
@@ -61,9 +60,8 @@ void UserProfile_Default(UserProfile *profile, const char *name, uint16_t id)
 
 bool UserProfile_Valid(const UserProfile *p)
 {
-  return p != NULL && p->fingerprint_id != UINT16_MAX && UserProfile_ValidDpi(p->dpi) &&
+  return p != NULL && p->fingerprint_id <= UINT8_MAX && UserProfile_ValidDpi(p->dpi) &&
          UserProfile_ValidText(p->name, PROFILE_NAME_MAX, false) &&
-         UserProfile_ValidText(p->computer_username, PROFILE_USERNAME_MAX, true) &&
          p->rgb_mode <= 3U && p->brightness <= 100U && p->effect_speed >= 1U &&
          p->effect_speed <= 5U && p->side1_macro < MACRO_COUNT && p->side2_macro < MACRO_COUNT &&
          (p->password[0] == '\0' || UserProfile_ValidPassword(p->password));
@@ -71,7 +69,7 @@ bool UserProfile_Valid(const UserProfile *p)
 bool UserProfile_Same(const UserProfile *a, const UserProfile *b)
 {
   return a->fingerprint_id == b->fingerprint_id && a->dpi == b->dpi &&
-         strcmp(a->name, b->name) == 0 && strcmp(a->computer_username, b->computer_username) == 0 &&
+         strcmp(a->computer_username, b->computer_username) == 0 &&
          a->rgb_mode == b->rgb_mode && a->red == b->red && a->green == b->green &&
          a->blue == b->blue && a->brightness == b->brightness &&
          a->effect_speed == b->effect_speed && a->side1_macro == b->side1_macro &&

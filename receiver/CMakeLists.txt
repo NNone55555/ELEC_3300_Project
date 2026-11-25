@@ -39,6 +39,7 @@ add_subdirectory(cmake/stm32cubemx)
 
 # Preserve the application-owned mouse/keyboard HID class across CubeMX generation.
 include(cmake/receiver_hid.cmake)
+include(../shared/security.cmake)
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE

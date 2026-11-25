@@ -69,16 +69,18 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ../shared/wireless_packet.c
 )
 
-# Passwords are configured through UART and stored in prototype EEPROM records.
-# The old private/login_credentials.h is preserved locally but is not compiled.
-
 # Build the mouse's USB implementation from usb/ after CubeMX generation.
 include(cmake/usb_device.cmake)
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/private/profile_key.h")
+    message(FATAL_ERROR "Run python tools/provision_keys.py to create the EEPROM key.")
+endif()
+include(../shared/security.cmake)
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     Core/Inc
+    private
     ../shared
 )
 

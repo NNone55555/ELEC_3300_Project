@@ -93,7 +93,9 @@ void Fingerprint_Step(FingerprintController *controller, bool control_pressed)
       break;
 
     case FP_FIND_FREE_SLOT:
-      result = Zw3020_FindFreeSlot(controller->storage.capacity, &controller->enrollment_id);
+    {
+      uint16_t profile_slots = controller->storage.capacity > 256U ? 256U : controller->storage.capacity;
+      result = Zw3020_FindFreeSlot(profile_slots, &controller->enrollment_id);
       if (result == ZW3020_FULL)
       {
         controller->result = FP_RESULT_FULL;
@@ -108,6 +110,7 @@ void Fingerprint_Step(FingerprintController *controller, bool control_pressed)
         EnterState(controller, FP_WAIT_FIRST_SCAN);
       }
       break;
+    }
 
     case FP_READY:
     case FP_WAIT_FIRST_SCAN:

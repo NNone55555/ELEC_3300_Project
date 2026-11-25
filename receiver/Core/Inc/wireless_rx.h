@@ -11,6 +11,10 @@ typedef struct {
   uint16_t user_id;
   uint32_t accepted;
   uint32_t duplicates;
+  uint32_t hellos;
+  uint32_t rejected;
+  uint32_t link_timeouts;
+  uint32_t usb_disconnects;
 } WirelessRxStatus;
 
 /* Called by the receiver main loop. No waits for USB or radio. */

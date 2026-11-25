@@ -37,8 +37,9 @@
 #define FIFO_RX_EMPTY 0x01U
 #define FIFO_TX_FULL 0x20U
 #define FEATURE_ACK_PAYLOADS 0x06U /* EN_DPL | EN_ACK_PAY. */
+#define RF_DR_LOW 0x20U /* 250 kbit/s when RF_DR_HIGH is clear. */
 #define SPI_TIMEOUT_MS 2U
-#define TX_TIMEOUT_MS 15U
+#define TX_TIMEOUT_MS 22U
 
 static const uint8_t address[] = {0xC3U, 0x57U, 0x33U, 0x90U, 0xA6U};
 static SPI_HandleTypeDef *radio_spi;
@@ -53,7 +54,7 @@ static void SetCe(GPIO_PinState level)
 
 static bool Transfer(uint8_t command, const uint8_t *out, uint8_t *in, uint16_t size)
 {
-  uint8_t tx[1U + WIRELESS_PACKET_SIZE] = {command};
+  uint8_t tx[1U + SECURE_RADIO_BYTES] = {command};
   uint8_t rx[sizeof(tx)];
   if (out != NULL)
     memcpy(&tx[1], out, size);
@@ -106,10 +107,10 @@ bool NrfMotion_Init(SPI_HandleTypeDef *spi, NrfMotionRole role)
     {NRF_EN_AA, 0x01U},      /* Auto-ack only on pipe 0. */
     {NRF_EN_RXADDR, 0x01U},
     {NRF_SETUP_AW, 0x03U},   /* Five-byte address. */
-    {NRF_SETUP_RETR, 0x23U}, /* 750 us retry delay, up to three retries. */
+    {NRF_SETUP_RETR, 0x63U}, /* 1750 us for a full 32-byte ACK at 250 kbit/s. */
     {NRF_RF_CH, 76U},
-    {NRF_RF_SETUP, 0x00U},   /* 1 Mbit/s, lowest radio drive for bench use. */
-    {NRF_RX_PW_P0, WIRELESS_PACKET_SIZE}
+    {NRF_RF_SETUP, RF_DR_LOW}, /* Keep the lowest radio drive with PA modules. */
+    {NRF_RX_PW_P0, SECURE_RADIO_BYTES}
   };
 
   radio_spi = spi;
@@ -153,7 +154,7 @@ bool NrfMotion_Init(SPI_HandleTypeDef *spi, NrfMotionRole role)
   return true;
 }
 
-bool NrfMotion_StartTx(const uint8_t payload[WIRELESS_PACKET_SIZE])
+bool NrfMotion_StartTx(const uint8_t payload[SECURE_RADIO_BYTES])
 {
   if (tx_state == NRF_TX_UNAVAILABLE || tx_state == NRF_TX_PENDING)
     return false;
@@ -161,7 +162,7 @@ bool NrfMotion_StartTx(const uint8_t payload[WIRELESS_PACKET_SIZE])
   if (!Transfer(NRF_FLUSH_TX, NULL, NULL, 0U)
       || !Transfer(NRF_FLUSH_RX, NULL, NULL, 0U)
       || !WriteRegister(NRF_STATUS, STATUS_TX_FLAGS | STATUS_RX_DR)
-      || !Transfer(NRF_W_TX_PAYLOAD, payload, NULL, WIRELESS_PACKET_SIZE))
+      || !Transfer(NRF_W_TX_PAYLOAD, payload, NULL, SECURE_RADIO_BYTES))
   {
     tx_state = NRF_TX_ERROR;
     return false;
@@ -206,7 +207,7 @@ NrfMotionTxState NrfMotion_GetTxState(void)
   return tx_state;
 }
 
-static NrfMotionRxResult ReadPayload(uint8_t payload[WIRELESS_PACKET_SIZE])
+static NrfMotionRxResult ReadPayload(uint8_t payload[SECURE_RADIO_BYTES])
 {
   uint8_t fifo, size;
   if (!Transfer(NRF_R_REGISTER | NRF_FIFO_STATUS, NULL, &fifo, 1U)
@@ -217,32 +218,32 @@ static NrfMotionRxResult ReadPayload(uint8_t payload[WIRELESS_PACKET_SIZE])
 
   if (!Transfer(NRF_R_RX_PL_WID, NULL, &size, 1U))
     return NRF_RX_ERROR;
-  if (size != WIRELESS_PACKET_SIZE)
+  if (size != SECURE_RADIO_BYTES)
   {
     (void)Transfer(NRF_FLUSH_RX, NULL, NULL, 0U);
     (void)WriteRegister(NRF_STATUS, STATUS_RX_DR);
     return NRF_RX_ERROR;
   }
-  if (!Transfer(NRF_R_RX_PAYLOAD, NULL, payload, WIRELESS_PACKET_SIZE)
+  if (!Transfer(NRF_R_RX_PAYLOAD, NULL, payload, SECURE_RADIO_BYTES)
       || !WriteRegister(NRF_STATUS, STATUS_RX_DR))
     return NRF_RX_ERROR;
   return NRF_RX_PACKET;
 }
 
-NrfMotionRxResult NrfMotion_Read(uint8_t payload[WIRELESS_PACKET_SIZE])
+NrfMotionRxResult NrfMotion_Read(uint8_t payload[SECURE_RADIO_BYTES])
 {
   return rx_ready ? ReadPayload(payload) : NRF_RX_ERROR;
 }
 
-NrfMotionRxResult NrfMotion_ReadAck(uint8_t payload[WIRELESS_PACKET_SIZE])
+NrfMotionRxResult NrfMotion_ReadAck(uint8_t payload[SECURE_RADIO_BYTES])
 {
   return tx_state == NRF_TX_ACKED ? ReadPayload(payload) : NRF_RX_EMPTY;
 }
 
-bool NrfMotion_QueueAck(const uint8_t payload[WIRELESS_PACKET_SIZE])
+bool NrfMotion_QueueAck(const uint8_t payload[SECURE_RADIO_BYTES])
 {
   uint8_t fifo;
   return rx_ready && Transfer(NRF_R_REGISTER | NRF_FIFO_STATUS, NULL, &fifo, 1U)
          && (fifo & FIFO_TX_FULL) == 0U
-         && Transfer(NRF_W_ACK_PAYLOAD_P0, payload, NULL, WIRELESS_PACKET_SIZE);
+         && Transfer(NRF_W_ACK_PAYLOAD_P0, payload, NULL, SECURE_RADIO_BYTES);
 }

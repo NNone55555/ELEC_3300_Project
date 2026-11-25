@@ -235,11 +235,11 @@ static void Render(void)
             temporary.computer_username);
       break;
     case MENU_USERNAME_INPUT:
-      Print("\r\nEnter new computer username (1..15 printable ASCII):\r\n0. Cancel / Back\r\n");
+      Print("\r\nEnter username/display name (1..15 printable ASCII):\r\n0. Cancel / Back\r\n");
       break;
     case MENU_RENAME_INPUT:
       Print(
-          "\r\nCurrent Name: %s\r\nEnter new name (1..15 printable ASCII):\r\n0. Cancel / Back\r\n",
+          "\r\nCurrent Name: %s\r\nEnter new display name/username (1..15 printable ASCII):\r\n0. Cancel / Back\r\n",
           temporary.name);
       break;
     case MENU_CONFIRM:
@@ -281,7 +281,7 @@ static void Render(void)
       break;
     case MENU_PASSWORD:
       Print("\r\n========== COMPUTER PASSWORD ==========\r\nPassword Status: [%s]\r\n"
-            "Stored unencrypted in EEPROM (prototype).\r\n1. Change Password\r\n2. "
+            "Encrypted in EEPROM.\r\n1. Change Password\r\n2. "
             "Clear Password\r\n3. Back\r\n",
             temporary.password[0] ? "SET" : "NOT SET");
       break;
@@ -1098,7 +1098,12 @@ static void PollBackend(void)
     }
     else if (fp.reply == FP_REPLY_DUPLICATE)
     {
-      if (ProfileStorage_Find(fp.id, NULL))
+      if (fp.id > UINT8_MAX)
+      {
+        Notice("Profile IDs must fit in 0..255. Use an enrollment in that range.");
+        Show(MENU_ENROLL_RETRY);
+      }
+      else if (ProfileStorage_Find(fp.id, NULL))
         Show(MENU_ENROLL_RETRY);
       else
       {
@@ -1168,7 +1173,7 @@ void ConfigMenu_Init(void)
   password_mismatch = false;
   memset(line, 0, sizeof(line));
   const char *banner = "\r\nELEC3300 configuration ready: type config then Enter.\r\n"
-                       "Password storage is unencrypted (prototype).\r\n";
+                       "Password storage is encrypted.\r\n";
   (void)Console_Write(banner, strlen(banner));
 }
 bool ConfigMenu_Active(void)

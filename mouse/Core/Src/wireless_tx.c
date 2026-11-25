@@ -1,15 +1,19 @@
 #include "wireless_tx.h"
 #include "nrf_motion.h"
+#include "boot_epoch.h"
+#include "aes_ccm.h"
 #include <string.h>
 
 #define INPUT_RETRY_MS 3U
 #define SYNC_RETRY_MS 12U
+#define SYNC_TIMEOUT_MS 450U
 #define HEARTBEAT_MS 25U
 /* A full int16 movement can take over 250 one-millisecond USB reports. */
 #define INPUT_PROGRESS_TIMEOUT_MS 1000U
 
 static WirelessPacket outbound;
-static uint8_t wire_bytes[WIRELESS_PACKET_SIZE];
+static RadioBinding binding;
+static RadioReplay replay;
 static bool frame_pending, attempt_pending, enabled;
 static uint16_t epoch;
 static uint8_t sequence, held_buttons;
@@ -24,7 +28,6 @@ static void QueueFrame(void)
 {
   outbound.epoch = epoch;
   outbound.sequence = sequence;
-  WirelessPacket_Encode(&outbound, wire_bytes);
   frame_started = HAL_GetTick();
   frame_pending = true;
 }
@@ -36,6 +39,7 @@ static void BeginSession(uint32_t now)
   held_buttons = 0U;
   sent_user = WIRELESS_NO_USER;
   attempt_pending = false;
+  binding = (RadioBinding){.mouse_boot = BootEpoch_Value(), .hello = SecureRadio_NextCounter()};
   if (++epoch == 0U)
     ++epoch;
   sequence = 0U;
@@ -71,18 +75,28 @@ bool WirelessTx_SendKeyboard(uint8_t modifiers, const uint8_t keys[6])
 
 static void HandleAck(uint32_t now)
 {
-  uint8_t payload[WIRELESS_PACKET_SIZE];
+  uint8_t wire[SECURE_RADIO_BYTES], payload[WIRELESS_PACKET_SIZE];
   WirelessPacket reply;
-  if (NrfMotion_ReadAck(payload) != NRF_RX_PACKET || !WirelessPacket_Decode(&reply, payload)
+  if (NrfMotion_ReadAck(wire) != NRF_RX_PACKET)
+    return;
+  if (binding.challenge == 0U)
+  {
+    if (SecureRadio_Open(RADIO_CHALLENGE, &binding, &replay, wire, payload))
+    {
+      binding.challenge = SecureRadio_ReadTicket(payload);
+      binding.receiver_boot = SecureRadio_PeerBoot(wire);
+      frame_started = now;
+      last_attempt = now - SYNC_RETRY_MS;
+    }
+    return;
+  }
+  if (!SecureRadio_Open(RADIO_FEEDBACK, &binding, &replay, wire, payload)
+      || !WirelessPacket_Decode(&reply, payload)
       || reply.kind != WIRELESS_ACK)
     return;
 
   if ((reply.data.ack.flags & WIRELESS_ACK_SYNCED) == 0U || reply.epoch != epoch)
-  {
-    if (ready)
-      BeginSession(now);
     return;
-  }
 
   last_contact = now;
   keyboard_leds = reply.data.ack.leds;
@@ -110,7 +124,7 @@ void WirelessTx_Service(bool allow_wireless)
 {
   NrfMotion_PollTx();
   NrfMotionTxState state = NrfMotion_GetTxState();
-  if (!allow_wireless || state == NRF_TX_UNAVAILABLE)
+  if (!allow_wireless || state == NRF_TX_UNAVAILABLE || BootEpoch_Value() == 0)
   {
     ready = false;
     enabled = frame_pending = attempt_pending = false;
@@ -133,6 +147,9 @@ void WirelessTx_Service(bool allow_wireless)
   if (ready && ((uint32_t)(now - last_contact) >= WIRELESS_LINK_TIMEOUT_MS
                 || (frame_pending && (uint32_t)(now - frame_started) >= INPUT_PROGRESS_TIMEOUT_MS)))
     BeginSession(now);
+  if (!ready && binding.challenge != 0U
+      && (uint32_t)(now - frame_started) >= SYNC_TIMEOUT_MS)
+    BeginSession(now);
 
   if (ready && !frame_pending
       && ((uint32_t)(now - last_mouse) >= HEARTBEAT_MS || active_user != sent_user))
@@ -142,7 +159,15 @@ void WirelessTx_Service(bool allow_wireless)
   if (frame_pending && state != NRF_TX_PENDING && (uint32_t)(now - last_attempt) >= interval)
   {
     last_attempt = now;
-    attempt_pending = NrfMotion_StartTx(wire_bytes);
+    uint8_t body[WIRELESS_PACKET_SIZE], wire[SECURE_RADIO_BYTES];
+    RadioMessage message = binding.challenge == 0U ? RADIO_HELLO : RADIO_INPUT;
+    if (message == RADIO_HELLO)
+      SecureRadio_WriteTicket(body, binding.hello);
+    else
+      WirelessPacket_Encode(&outbound, body);
+    /* New nonce per software retry. The HID sequence stays the same. */
+    attempt_pending = SecureRadio_Seal(message, &binding, body, wire) && NrfMotion_StartTx(wire);
+    Crypto_Clear(body, sizeof(body));
   }
 }
 

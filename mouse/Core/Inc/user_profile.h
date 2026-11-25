@@ -24,12 +24,14 @@ typedef struct
 {
   uint16_t fingerprint_id;
   uint16_t dpi;
-  char name[PROFILE_NAME_MAX + 1U];
-  char computer_username[PROFILE_USERNAME_MAX + 1U];
+  union {
+    char name[PROFILE_NAME_MAX + 1U];
+    char computer_username[PROFILE_USERNAME_MAX + 1U];
+  }; /* Both names refer to the same EEPROM field. */
   uint8_t rgb_mode; /* Same 0..3 OFF/STATIC/BREATHING/RAINBOW order as WS2812B. */
   uint8_t red, green, blue, brightness, effect_speed; /* Speed 1..5. */
   uint8_t side1_macro, side2_macro;
-  char password[PROFILE_PASSWORD_MAX + 1U]; /* Unencrypted prototype storage; never log. */
+  char password[PROFILE_PASSWORD_MAX + 1U]; /* Plaintext in RAM only; never log. */
 } UserProfile;
 
 void UserProfile_Default(UserProfile *profile, const char *name, uint16_t fingerprint_id);

@@ -25,6 +25,7 @@
 #include "lcd.h"
 #include "nrf_motion.h"
 #include "wireless_rx.h"
+#include "boot_epoch.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -65,7 +66,7 @@ static void MX_SPI1_Init(void);
 /* USER CODE BEGIN 0 */
 static void DrawStatusLine(uint8_t row, const char *text)
 {
-  static char lines[3][30];
+  static char lines[5][30];
   for (unsigned col = 0; col < sizeof(lines[0]); ++col)
   {
     char next = *text == '\0' ? ' ' : *text++;
@@ -103,6 +104,12 @@ static void ShowWirelessStatus(void)
   snprintf(line, sizeof(line), "RX:%lu Dup:%lu", (unsigned long)status.accepted,
            (unsigned long)status.duplicates);
   DrawStatusLine(2, line);
+  snprintf(line, sizeof(line), "Hello:%lu Reject:%lu", (unsigned long)status.hellos,
+           (unsigned long)status.rejected);
+  DrawStatusLine(3, line);
+  snprintf(line, sizeof(line), "RF loss:%lu USB loss:%lu", (unsigned long)status.link_timeouts,
+           (unsigned long)status.usb_disconnects);
+  DrawStatusLine(4, line);
 }
 /* USER CODE END 0 */
 
@@ -141,7 +148,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
   LCD_INIT();
   LCD_DrawString(0, 0, "receiver");
-  (void)NrfMotion_Init(&hspi1, NRF_MOTION_RX);
+  if (BootEpoch_Reserve())
+    (void)NrfMotion_Init(&hspi1, NRF_MOTION_RX);
   /* USER CODE END 2 */
 
   /* Infinite loop */

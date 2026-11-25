@@ -28,6 +28,7 @@
 #include "zw3020.h"
 #include "battery_monitor.h"
 #include "nrf_motion.h"
+#include "boot_epoch.h"
 #include "ws2812b.h"
 #include "ws2812b_task.h"
 #include "console_uart.h"
@@ -68,7 +69,7 @@ SRAM_HandleTypeDef hsram1;
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 512 * 4,
+  .stack_size = 640 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* USER CODE BEGIN PV */
@@ -141,7 +142,8 @@ int main(void)
   LCD_DrawString(0, 0, "Starting mouse sensors...");
   if (!BatteryMonitor_Init(&hadc1))
     LCD_DrawString(0, 60, "Battery ADC calibration failed");
-  (void)NrfMotion_Init(&hspi1, NRF_MOTION_TX); /* Status appears on the LCD. */
+  if (BootEpoch_Reserve())
+    (void)NrfMotion_Init(&hspi1, NRF_MOTION_TX); /* Status appears on the LCD. */
   /* USER CODE END 2 */
 
   /* Init scheduler */

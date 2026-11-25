@@ -74,7 +74,7 @@ static const osThreadAttr_t fingerprint_attributes = {
 };
 static const osThreadAttr_t usb_attributes = {
   .name = "mouseInput",
-  .stack_size = 1536,
+  .stack_size = 2048, /* Includes the radio AES-CCM call chain. */
   .priority = osPriorityHigh
 };
 

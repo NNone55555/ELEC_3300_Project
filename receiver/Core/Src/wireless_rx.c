@@ -2,6 +2,7 @@
 #include "nrf_motion.h"
 #include "usb_hid_controller.h"
 #include "usbd_hid.h"
+#include "boot_epoch.h"
 
 static WirelessRxStatus status = {.user_id = WIRELESS_NO_USER};
 static WirelessPacket pending;
@@ -12,6 +13,8 @@ static uint32_t usb_session, last_packet;
 static uint16_t epoch;
 static uint8_t accepted_sequence;
 static WirelessKind accepted_kind;
+static RadioBinding active_binding, candidate;
+static RadioReplay replay;
 
 static void ResetLink(void)
 {
@@ -20,6 +23,7 @@ static void ResetLink(void)
   pending = (WirelessPacket){0};
   report_pending = false;
   release_mouse = release_keyboard = true;
+  active_binding = (RadioBinding){0};
 }
 
 static int8_t HidDelta(int16_t value)
@@ -74,10 +78,25 @@ static void DeliverHid(void)
   report_pending = false;
 }
 
-static void ReceivePacket(const WirelessPacket *packet, uint32_t now)
+static void ReceivePacket(const WirelessPacket *packet, uint32_t now, bool proof)
 {
   if (!usb_configured || release_mouse || release_keyboard)
     return;
+  if (proof)
+  {
+    if (packet->kind != WIRELESS_SYNC)
+      return;
+    if (status.linked)
+    {
+      ResetLink();
+      return; /* The next proof can open the link after neutral reports. */
+    }
+    active_binding = candidate;
+    candidate = (RadioBinding){0};
+  }
+  else if (!status.linked)
+    return;
+
   if (packet->kind == WIRELESS_SYNC)
   {
     if (status.linked && packet->epoch != epoch)
@@ -98,8 +117,6 @@ static void ReceivePacket(const WirelessPacket *packet, uint32_t now)
     {
       last_packet = now;
     }
-    /* A mouse reboot can reuse an epoch. If data has already been accepted,
-     * the old session expires before this SYNC can open a new one. */
     return;
   }
   if (packet->kind == WIRELESS_ACK || !status.linked || packet->epoch != epoch)
@@ -121,23 +138,62 @@ static void ReceivePacket(const WirelessPacket *packet, uint32_t now)
 
 static void QueueFeedback(void)
 {
-  WirelessPacket ack = {.kind = WIRELESS_ACK};
-  if (usb_configured && !release_mouse && !release_keyboard)
-  {
-    ack.data.ack.flags = WIRELESS_ACK_READY;
-    ack.data.ack.leds = USBD_HID_GetKeyboardLeds();
-    if (status.linked)
-    {
-      ack.data.ack.flags |= WIRELESS_ACK_SYNCED;
-      ack.data.ack.accepted_kind = accepted_kind;
-      ack.epoch = epoch;
-      ack.sequence = accepted_sequence;
-    }
-  }
-  uint8_t wire_bytes[WIRELESS_PACKET_SIZE];
-  WirelessPacket_Encode(&ack, wire_bytes);
+  WirelessPacket ack = {
+    .kind = WIRELESS_ACK, .sequence = accepted_sequence, .epoch = epoch,
+    .data.ack = {WIRELESS_ACK_READY | WIRELESS_ACK_SYNCED, USBD_HID_GetKeyboardLeds(), accepted_kind}
+  };
+  uint8_t body[WIRELESS_PACKET_SIZE], wire[SECURE_RADIO_BYTES];
+  WirelessPacket_Encode(&ack, body);
   /* The FIFO is bounded. If full, the sender's next retry consumes a slot. */
-  (void)NrfMotion_QueueAck(wire_bytes);
+  if (SecureRadio_Seal(RADIO_FEEDBACK, &active_binding, body, wire))
+    (void)NrfMotion_QueueAck(wire);
+}
+
+static void ReceiveSecure(const uint8_t wire[SECURE_RADIO_BYTES], uint32_t now)
+{
+  uint8_t body[WIRELESS_PACKET_SIZE];
+  if (SecureRadio_Message(wire) == RADIO_HELLO)
+  {
+    if (!usb_configured || release_mouse || release_keyboard)
+      return;
+    if (!SecureRadio_Open(RADIO_HELLO, NULL, &replay, wire, body))
+    {
+      ++status.rejected;
+      return;
+    }
+    uint32_t hello = SecureRadio_ReadTicket(body);
+    uint64_t mouse_boot = SecureRadio_PeerBoot(wire);
+    if (hello == 0U)
+      return;
+    ++status.hellos;
+    if (candidate.mouse_boot != mouse_boot || candidate.hello != hello)
+      candidate = (RadioBinding){mouse_boot, BootEpoch_Value(), hello, SecureRadio_NextCounter()};
+    if (candidate.challenge != 0U)
+    {
+      uint8_t reply[SECURE_RADIO_BYTES];
+      SecureRadio_WriteTicket(body, candidate.challenge);
+      if (SecureRadio_Seal(RADIO_CHALLENGE, &candidate, body, reply))
+        (void)NrfMotion_QueueAck(reply);
+    }
+    return;
+  }
+
+  bool proof = candidate.challenge != 0U && SecureRadio_Open(RADIO_INPUT, &candidate, &replay, wire, body);
+  if (!proof && (active_binding.challenge == 0U
+                 || !SecureRadio_Open(RADIO_INPUT, &active_binding, &replay, wire, body)))
+  {
+    ++status.rejected;
+    return;
+  }
+  uint32_t reply_challenge = proof ? candidate.challenge : active_binding.challenge;
+  WirelessPacket packet;
+  if (!WirelessPacket_Decode(&packet, body))
+    return;
+  ReceivePacket(&packet, now, proof);
+  DeliverHid();
+  /* Feedback for a new handshake is useful only after it has taken over. */
+  if (status.linked && active_binding.challenge == reply_challenge)
+    QueueFeedback();
 }
 
 void WirelessRx_Service(void)
@@ -145,29 +201,36 @@ void WirelessRx_Service(void)
   uint32_t now = HAL_GetTick();
   uint32_t current_session = USBD_HID_GetSession();
   bool configured = UsbHid_IsConfigured();
-  if (configured != usb_configured || current_session != usb_session
-      || (status.linked && (uint32_t)(now - last_packet) >= WIRELESS_LINK_TIMEOUT_MS))
+  if (configured != usb_configured || current_session != usb_session)
+  {
+    if (status.linked)
+      ++status.usb_disconnects;
     ResetLink();
+    candidate = (RadioBinding){0};
+  }
+  else if (status.linked && (uint32_t)(now - last_packet) >= WIRELESS_LINK_TIMEOUT_MS)
+  {
+    ++status.link_timeouts;
+    ResetLink(); /* A fresh handshake can already be in progress. */
+  }
 
   usb_configured = configured;
   usb_session = current_session;
   status.usb_ready = configured;
   DeliverHid();
-  status.radio_error = false;
+  status.radio_error = BootEpoch_Value() == 0;
+  if (status.radio_error)
+    return;
   for (unsigned i = 0; i < 3U; ++i)
   {
-    uint8_t wire_bytes[WIRELESS_PACKET_SIZE];
+    uint8_t wire_bytes[SECURE_RADIO_BYTES];
     NrfMotionRxResult result = NrfMotion_Read(wire_bytes);
     if (result != NRF_RX_PACKET)
     {
       status.radio_error = result == NRF_RX_ERROR;
       break;
     }
-    WirelessPacket packet;
-    if (WirelessPacket_Decode(&packet, wire_bytes))
-      ReceivePacket(&packet, now);
-    DeliverHid();
-    QueueFeedback();
+    ReceiveSecure(wire_bytes, now);
   }
 }
 
