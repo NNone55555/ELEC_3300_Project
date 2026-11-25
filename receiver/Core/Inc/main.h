@@ -58,6 +58,8 @@ void Error_Handler(void);
 
 /* Private defines -----------------------------------------------------------*/
 #define NRF_IRQ_Pin GPIO_PIN_4
+#define FLASH_CS_Pin GPIO_PIN_0
+#define FLASH_CS_GPIO_Port GPIOC
 #define NRF_IRQ_GPIO_Port GPIOC
 #define NRF_IRQ_EXTI_IRQn EXTI4_IRQn
 #define NRF_CE_Pin GPIO_PIN_5

@@ -10,6 +10,7 @@
 #include "profile_manager.h"
 #include "fingerprint_service.h"
 #include "battery_monitor.h"
+#include "nrf_motion.h"
 #include "lcd.h"
 #include "main.h"
 #include "cmsis_os2.h"
@@ -22,6 +23,7 @@
 #define DEFAULT_CPI 800U
 #define MOTION_PERIOD_TICKS 5U
 #define OPTICAL_RETRY_MS 2000U
+#define RADIO_TEST_INTERVAL_MS 50U
 #define FP_CONTROL_FLAG 1U
 #define DISPLAY_ROWS 20U
 #define DISPLAY_COLUMNS 30U
@@ -90,6 +92,35 @@ static int32_t AddCounts(int32_t current, int16_t delta)
   return (int32_t)sum;
 }
 
+static int16_t LimitRadioDelta(int32_t delta)
+{
+  if (delta > INT16_MAX) return INT16_MAX;
+  if (delta < INT16_MIN) return INT16_MIN;
+  return (int16_t)delta;
+}
+
+/* One signed X/Y pair per interval. A zero pair keeps the link visible at rest. */
+static void RunRadioTest(int16_t dx, int16_t dy)
+{
+  static uint32_t last_send;
+  static int32_t accumulated_x;
+  static int32_t accumulated_y;
+  NrfMotion_PollTx();
+  NrfMotionTxState state = NrfMotion_GetTxState();
+  if (state == NRF_TX_UNAVAILABLE)
+    return;
+
+  accumulated_x = AddCounts(accumulated_x, dx);
+  accumulated_y = AddCounts(accumulated_y, dy);
+  uint32_t now = HAL_GetTick();
+  if (state != NRF_TX_PENDING && (uint32_t)(now - last_send) >= RADIO_TEST_INTERVAL_MS)
+  {
+    (void)NrfMotion_StartTx(LimitRadioDelta(accumulated_x), LimitRadioDelta(accumulated_y));
+    last_send = now;
+    accumulated_x = accumulated_y = 0;
+  }
+}
+
 void MouseApp_SampleInputs1ms(void)
 {
   if (!inputs_enabled)
@@ -150,6 +181,8 @@ static void MotionTask(void *argument)
     }
 
     UsbHid_AddMotion(motion.dx, motion.dy, 0);
+    RunRadioTest(optical_status == PMW3360_OK ? motion.dx : 0,
+                 optical_status == PMW3360_OK ? motion.dy : 0);
     osMutexAcquire(status_mutex, osWaitForever);
     shared_status.optical_status = optical_status;
     shared_status.motion = motion;
@@ -329,7 +362,9 @@ static void RenderStatus(const MouseStatus *status)
   RenderLine(6, text);
   snprintf(text, sizeof(text), "dX=%d dY=%d", status->motion.dx, status->motion.dy);
   RenderLine(7, text);
-  snprintf(text, sizeof(text), "X total: %ld", (long)status->x_total);
+  static const char *const radio_states[] = {"INIT!", "Ready", "TX", "ACK", "NoACK", "Err"};
+  snprintf(text, sizeof(text), "X total:%ld RF:%s", (long)status->x_total,
+           radio_states[NrfMotion_GetTxState()]);
   RenderLine(8, text);
   snprintf(text, sizeof(text), "Y total: %ld", (long)status->y_total);
   RenderLine(9, text);

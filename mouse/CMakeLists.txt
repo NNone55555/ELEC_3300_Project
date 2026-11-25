@@ -64,6 +64,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/fingerprint_service.c
     Core/Src/profile_manager.c
     Core/Src/config_menu.c
+    ../shared/nrf_motion.c
 )
 
 # Passwords are configured through UART and stored in prototype EEPROM records.
@@ -76,6 +77,7 @@ include(cmake/usb_device.cmake)
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     Core/Inc
+    ../shared
 )
 
 # Add project symbols (macros)

@@ -1,6 +1,6 @@
 {
-    "cmake.sourceDirectory": "C:/Users/USER/Documents/ELEC3300/ELEC3300/mouse",
-    // "cmake.sourceDirectory": "C:/Users/USER/Documents/ELEC3300/ELEC3300/receiver",
+    // "cmake.sourceDirectory": "${workspaceFolder}/mouse",
+    "cmake.sourceDirectory": "${workspaceFolder}/receiver",
     "cmake.buildBeforeRun": true,
     "cmake.useCMakePresets": "always"
 }

@@ -23,7 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lcd.h"
-#include "usb_hid_controller.h"
+#include "nrf_motion.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -61,7 +62,55 @@ static void MX_SPI1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void ShowRadioTest(void)
+{
+  static uint32_t packets;
+  static uint32_t last_packet;
+  static uint32_t last_display;
+  static int16_t last_x;
+  static int16_t last_y;
+  static bool received;
+  bool spi_error = false;
 
+  /* Drain at most one full RX FIFO per pass. Zero deltas are heartbeats. */
+  for (unsigned i = 0; i < 3U; ++i)
+  {
+    int16_t dx, dy;
+    NrfMotionRxResult result = NrfMotion_Read(&dx, &dy);
+    if (result != NRF_RX_PACKET)
+    {
+      spi_error = result == NRF_RX_ERROR;
+      break;
+    }
+    ++packets;
+    received = true;
+    last_packet = HAL_GetTick();
+    if (dx != 0 || dy != 0)
+    {
+      last_x = dx;
+      last_y = dy;
+    }
+  }
+
+  uint32_t now = HAL_GetTick();
+  if ((uint32_t)(now - last_display) < 100U)
+    return;
+
+  last_display = now;
+  const char *status = "nRF: waiting for mouse";
+  if (spi_error)
+    status = "nRF: SPI/init error";
+  else if (received)
+    status = (uint32_t)(now - last_packet) < 1000U ? "nRF: receiving" : "nRF: link lost";
+
+  char line[31];
+  snprintf(line, sizeof(line), "%-30s", status);
+  LCD_DrawString(0, 16, line);
+  snprintf(line, sizeof(line), "X: %+6d  Y: %+6d", (int)last_x, (int)last_y);
+  LCD_DrawString(0, 32, line);
+  snprintf(line, sizeof(line), "Packets: %10lu", (unsigned long)packets);
+  LCD_DrawString(0, 48, line);
+}
 /* USER CODE END 0 */
 
 /**
@@ -99,18 +148,18 @@ int main(void)
   /* USER CODE BEGIN 2 */
   LCD_INIT();
   LCD_DrawString(0, 0, "receiver");
+  (void)NrfMotion_Init(&hspi1, NRF_MOTION_RX);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* Transport decoding will call Send_Mouse_Action/Send_Keyboard_Action.
-     * The previous receiver had no active radio/event loop to migrate.
-     */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    ShowRadioTest();
+    HAL_Delay(1U);
   }
   /* USER CODE END 3 */
 }
@@ -224,7 +273,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOD, LCD_BL_Pin|USB_EN_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(NRF_CSN_GPIO_Port, NRF_CSN_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOC, FLASH_CS_Pin|NRF_CSN_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_SET);
@@ -235,8 +284,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(NRF_IRQ_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : NRF_CE_Pin NRF_CSN_Pin */
-  GPIO_InitStruct.Pin = NRF_CE_Pin|NRF_CSN_Pin;
+  /*Configure GPIO pins : FLASH_CS_Pin NRF_CE_Pin NRF_CSN_Pin */
+  GPIO_InitStruct.Pin = FLASH_CS_Pin|NRF_CE_Pin|NRF_CSN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

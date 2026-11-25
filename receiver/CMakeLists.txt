@@ -50,11 +50,13 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/lcd.c
     Core/Src/usb_hid_controller.c
+    ../shared/nrf_motion.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
+    ../shared
 )
 
 # Add project symbols (macros)
