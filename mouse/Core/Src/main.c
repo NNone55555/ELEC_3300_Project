@@ -23,7 +23,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#ifdef LCD_FOR_DEBUG
 #include "lcd.h"
+#endif
 #include "mouse_app.h"
 #include "zw3020.h"
 #include "battery_monitor.h"
@@ -138,12 +140,18 @@ int main(void)
   MX_TIM1_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+#ifdef LCD_FOR_DEBUG
   LCD_INIT();
   LCD_DrawString(0, 0, "Starting mouse sensors...");
+#endif
   if (!BatteryMonitor_Init(&hadc1))
+  {
+#ifdef LCD_FOR_DEBUG
     LCD_DrawString(0, 60, "Battery ADC calibration failed");
+#endif
+  }
   if (BootEpoch_Reserve())
-    (void)NrfMotion_Init(&hspi1, NRF_MOTION_TX); /* Status appears on the LCD. */
+    (void)NrfMotion_Init(&hspi1, NRF_MOTION_TX);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -172,12 +180,16 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
   if (defaultTaskHandle == NULL || !MouseApp_Init(&hspi2, &huart2, &huart1, &hi2c1))
   {
+#ifdef LCD_FOR_DEBUG
     LCD_DrawString(0, 20, "RTOS/sensor startup failed");
+#endif
     Error_Handler();
   }
   if (!WS2812B_TaskStart(&htim1))
   {
+#ifdef LCD_FOR_DEBUG
     LCD_DrawString(0, 40, "LED task/config startup failed");
+#endif
     Error_Handler();
   }
   /* USER CODE END RTOS_THREADS */
@@ -595,7 +607,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(PMW_NCS_GPIO_Port, PMW_NCS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LCD_BL_GPIO_Port, LCD_BL_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LCD_BL_GPIO_Port, LCD_BL_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(USB_ENABLE_GPIO_Port, USB_ENABLE_Pin, GPIO_PIN_SET);
@@ -702,7 +714,7 @@ static void MX_FSMC_Init(void)
 {
 
   /* USER CODE BEGIN FSMC_Init 0 */
-
+#ifdef LCD_FOR_DEBUG
   /* USER CODE END FSMC_Init 0 */
 
   FSMC_NORSRAM_TimingTypeDef Timing = {0};
@@ -750,7 +762,7 @@ static void MX_FSMC_Init(void)
   __HAL_AFIO_FSMCNADV_DISCONNECTED();
 
   /* USER CODE BEGIN FSMC_Init 2 */
-
+#endif
   /* USER CODE END FSMC_Init 2 */
 }
 

@@ -4,27 +4,30 @@
 #include "pmw3360.h"
 #include "mouse_buttons.h"
 #include "usb_hid_controller.h"
-#include "login_typing.h"
 #include "console_uart.h"
 #include "config_menu.h"
 #include "profile_manager.h"
 #include "fingerprint_service.h"
-#include "battery_monitor.h"
-#include "nrf_motion.h"
 #include "wireless_tx.h"
-#include "lcd.h"
 #include "main.h"
 #include "cmsis_os2.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include <limits.h>
+#ifdef LCD_FOR_DEBUG
+#include "battery_monitor.h"
+#include "lcd.h"
+#include "login_typing.h"
+#include "nrf_motion.h"
 #include <stdio.h>
 #include <string.h>
+#endif
 
 #define DEFAULT_CPI 800U
 #define MOTION_PERIOD_TICKS 5U
 #define OPTICAL_RETRY_MS 2000U
 #define FP_CONTROL_FLAG 1U
+#ifdef LCD_FOR_DEBUG
 #define DISPLAY_ROWS 20U
 #define DISPLAY_COLUMNS 30U
 
@@ -40,6 +43,9 @@ typedef struct {
 
 static MouseStatus shared_status;
 static osMutexId_t status_mutex;
+static char displayed_lines[DISPLAY_ROWS][DISPLAY_COLUMNS + 1U];
+#endif
+
 static osThreadId_t fingerprint_thread;
 static osThreadId_t motion_thread;
 static osThreadId_t usb_thread;
@@ -52,7 +58,6 @@ static volatile uint32_t button_presses;
 static uint8_t button_candidate;
 static uint8_t button_stable;
 static uint8_t button_samples;
-static char displayed_lines[DISPLAY_ROWS][DISPLAY_COLUMNS + 1U];
 
 bool MouseApp_SetDpi(uint16_t dpi)
 {
@@ -78,6 +83,7 @@ static const osThreadAttr_t usb_attributes = {
   .priority = osPriorityHigh
 };
 
+#ifdef LCD_FOR_DEBUG
 static int32_t AddCounts(int32_t current, int16_t delta)
 {
   int64_t sum = (int64_t)current + delta;
@@ -91,6 +97,7 @@ static int32_t AddCounts(int32_t current, int16_t delta)
   }
   return (int32_t)sum;
 }
+#endif
 
 void MouseApp_SampleInputs1ms(void)
 {
@@ -152,6 +159,7 @@ static void MotionTask(void *argument)
     }
 
     UsbHid_AddMotion(motion.dx, motion.dy, 0);
+#ifdef LCD_FOR_DEBUG
     osMutexAcquire(status_mutex, osWaitForever);
     shared_status.optical_status = optical_status;
     shared_status.motion = motion;
@@ -161,6 +169,7 @@ static void MotionTask(void *argument)
       shared_status.y_total = AddCounts(shared_status.y_total, motion.dy);
     }
     osMutexRelease(status_mutex);
+#endif
 
     next_wake += MOTION_PERIOD_TICKS;
     uint32_t now = osKernelGetTickCount();
@@ -195,10 +204,12 @@ static void InputTask(void *argument)
     WirelessTx_Service(!UsbHid_IsWired());
     UsbHid_AddMotion(0, 0, wheel);
     UsbHid_ServiceMouse(buttons.pressed);
+#ifdef LCD_FOR_DEBUG
     osMutexAcquire(status_mutex, osWaitForever);
     shared_status.buttons = buttons;
     shared_status.encoder = encoder;
     osMutexRelease(status_mutex);
+#endif
     ++next_wake;
     uint32_t now = osKernelGetTickCount();
     if ((int32_t)(next_wake - now) <= 0)
@@ -218,9 +229,11 @@ static void FingerprintTask(void *argument)
     bool pressed = (flags & osFlagsError) == 0U && (flags & FP_CONTROL_FLAG) != 0U;
     uint16_t normal_id;
     if (FpService_Step(&controller, pressed, &normal_id)) ProfileManager_OnFingerprintMatch(normal_id);
+#ifdef LCD_FOR_DEBUG
     osMutexAcquire(status_mutex, osWaitForever);
     shared_status.fingerprint = controller;
     osMutexRelease(status_mutex);
+#endif
   }
 }
 
@@ -230,6 +243,7 @@ bool MouseApp_Init(SPI_HandleTypeDef *optical_spi, UART_HandleTypeDef *fingerpri
   motion_spi = optical_spi;
   console = console_uart;
   profile_bus = profile_i2c;
+#ifdef LCD_FOR_DEBUG
   memset(&shared_status, 0, sizeof(shared_status));
   shared_status.optical_status = PMW3360_STARTING;
   Fingerprint_Init(&shared_status.fingerprint);
@@ -238,7 +252,10 @@ bool MouseApp_Init(SPI_HandleTypeDef *optical_spi, UART_HandleTypeDef *fingerpri
     .attr_bits = osMutexPrioInherit
   };
   status_mutex = osMutexNew(&mutex_attributes);
-  if (status_mutex == NULL || !Zw3020_Init(fingerprint_uart) || !Console_Init(console))
+  if (status_mutex == NULL)
+    return false;
+#endif
+  if (!Zw3020_Init(fingerprint_uart) || !Console_Init(console))
   {
     return false;
   }
@@ -257,6 +274,7 @@ bool MouseApp_Init(SPI_HandleTypeDef *optical_spi, UART_HandleTypeDef *fingerpri
   return fingerprint_thread != NULL && motion_thread != NULL && usb_thread != NULL;
 }
 
+#ifdef LCD_FOR_DEBUG
 static const char *FingerprintStateText(FingerprintState state)
 {
   static const char *const names[] = {
@@ -384,24 +402,29 @@ static void RenderStatus(const MouseStatus *status)
   RenderLine(19, text);
   UserProfile_ClearSecret(&active, sizeof(active));
 }
+#endif
 
 void MouseApp_RunDisplay(void)
 {
   ProfileManager_Init(profile_bus);
   ConfigMenu_Init();
+#ifdef LCD_FOR_DEBUG
   uint32_t last_display = HAL_GetTick() - 100U;
+#endif
   for (;;)
   {
     Console_Service();
     ConfigMenu_Poll();
     ProfileManager_Update();
     WirelessTx_SetUserId(ProfileManager_GetActiveId());
+#ifdef LCD_FOR_DEBUG
     MouseStatus snapshot;
     osMutexAcquire(status_mutex, osWaitForever);
     snapshot = shared_status;
     osMutexRelease(status_mutex);
     if ((uint32_t)(HAL_GetTick() - last_display) >= 100U)
     {last_display = HAL_GetTick(); RenderStatus(&snapshot);}
+#endif
 
     osDelay(10);
   }

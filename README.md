@@ -60,12 +60,13 @@ or USB reconfiguration, the receiver clears mouse buttons and keyboard keys
 before accepting a new session. The mouse discards interrupted login typing
 when either transport changes.
 
-The mouse LCD shows the pressed state and effective assignments for `S1`
-and `S2`. With one saved profile, the mouse loads its side-button assignments
-at boot. With multiple profiles, scan the intended user's fingerprint to
-select their mappings. Saving a verified profile applies its settings
-immediately if no user is active. Login typing requires a normal fingerprint
-match.
+The mouse LCD defaults to off. Uncomment `#define LCD_FOR_DEBUG` in
+`mouse/Core/Inc/main.h` and rebuild to show the pressed state and effective
+assignments for `S1` and `S2`. With one saved profile, the mouse loads its
+side-button assignments at boot. With multiple profiles, scan the intended
+user's fingerprint to select their mappings. Saving a verified profile applies
+its settings immediately if no user is active. Login typing requires a normal
+fingerprint match.
 
 ## EEPROM profile format
 

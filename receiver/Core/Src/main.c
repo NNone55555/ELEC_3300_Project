@@ -101,15 +101,15 @@ static void ShowWirelessStatus(void)
     snprintf(line, sizeof(line), "User ID: %u", (unsigned)status.user_id);
     DrawStatusLine(1, line);
   }
-  snprintf(line, sizeof(line), "RX:%lu Dup:%lu", (unsigned long)status.accepted,
-           (unsigned long)status.duplicates);
-  DrawStatusLine(2, line);
-  snprintf(line, sizeof(line), "Hello:%lu Reject:%lu", (unsigned long)status.hellos,
-           (unsigned long)status.rejected);
-  DrawStatusLine(3, line);
-  snprintf(line, sizeof(line), "RF loss:%lu USB loss:%lu", (unsigned long)status.link_timeouts,
-           (unsigned long)status.usb_disconnects);
-  DrawStatusLine(4, line);
+  // snprintf(line, sizeof(line), "RX:%lu Dup:%lu", (unsigned long)status.accepted,
+  //          (unsigned long)status.duplicates);
+  // DrawStatusLine(2, line);
+  // snprintf(line, sizeof(line), "Hello:%lu Reject:%lu", (unsigned long)status.hellos,
+  //          (unsigned long)status.rejected);
+  // DrawStatusLine(3, line);
+  // snprintf(line, sizeof(line), "RF loss:%lu USB loss:%lu", (unsigned long)status.link_timeouts,
+  //          (unsigned long)status.usb_disconnects);
+  // DrawStatusLine(4, line);
 }
 /* USER CODE END 0 */
 

@@ -99,6 +99,8 @@ void Error_Handler(void);
 #define LCD_RST_GPIO_Port GPIOE
 
 /* USER CODE BEGIN Private defines */
+/* Uncomment to enable the mouse's LCD and backlight. */
+// #define LCD_FOR_DEBUG
 
 /* USER CODE END Private defines */
 
